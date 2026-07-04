@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fleet Board Pro — Admin</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="loading">
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">🚚 Fleet Board Pro</div>
+      <div class="user-info">
+        <span id="userName" class="user-name"></span>
+        <span id="roleBadge" class="badge"></span>
+      </div>
+      <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
+    </header>
+
+    <main class="content">
+      <h2>Admin Dashboard</h2>
+      <p class="muted page-sub"><span id="companyName"></span></p>
+
+      <section class="cards">
+        <div class="card">
+          <h3>🏢 Outlets</h3>
+          <p>Manage your company's outlets and shops.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>🚐 Vehicles</h3>
+          <p>Add vehicles, assign drivers, set maintenance.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>👤 Drivers</h3>
+          <p>Manage driver records and details.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>🔑 Users</h3>
+          <p>Activate new users and assign roles.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>📋 All Requests</h3>
+          <p>View every vehicle request and its status.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>📊 Reports</h3>
+          <p>Job history and vehicle usage reports.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="loader">Loading…</div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script>initDashboard('admin');</script>
+</body>
+</html>

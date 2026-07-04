@@ -1,0 +1,6 @@
+# Real Supabase config (create from js/config.example.js).
+# Contains only public values, but kept out of the repo so each
+# environment uses its own project.
+js/config.js
+
+.DS_Store

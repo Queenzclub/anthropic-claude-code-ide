@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fleet Board Pro — Outlet</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="loading">
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">🚚 Fleet Board Pro</div>
+      <div class="user-info">
+        <span id="userName" class="user-name"></span>
+        <span id="roleBadge" class="badge"></span>
+      </div>
+      <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
+    </header>
+
+    <main class="content">
+      <h2>Outlet Dashboard</h2>
+      <p class="muted page-sub"><span id="companyName"></span></p>
+
+      <section class="cards">
+        <div class="card">
+          <h3>➕ Request Vehicle</h3>
+          <p>Create a new delivery or pickup request.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>📦 My Active Requests</h3>
+          <p>Track your pending and in-progress requests.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>🗂️ History</h3>
+          <p>Completed and cancelled requests.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="loader">Loading…</div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script>initDashboard('outlet');</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fleet Board Pro — Manager</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="loading">
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">🚚 Fleet Board Pro</div>
+      <div class="user-info">
+        <span id="userName" class="user-name"></span>
+        <span id="roleBadge" class="badge"></span>
+      </div>
+      <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
+    </header>
+
+    <main class="content">
+      <h2>Manager Dashboard</h2>
+      <p class="muted page-sub"><span id="companyName"></span></p>
+
+      <section class="cards">
+        <div class="card">
+          <h3>🕐 Pending Requests</h3>
+          <p>New vehicle requests waiting for a driver.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>🚚 Active Jobs</h3>
+          <p>Jobs that are accepted or on the road now.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>🟢 Vehicle Status</h3>
+          <p>Available, busy, and offline vehicles at a glance.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>🗺️ Live Locations</h3>
+          <p>See where your drivers are on the map.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+        <div class="card">
+          <h3>✅ Recent Completed</h3>
+          <p>Jobs finished today and recent history.</p>
+          <span class="soon">Coming soon</span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="loader">Loading…</div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script>initDashboard('manager');</script>
+</body>
+</html>
