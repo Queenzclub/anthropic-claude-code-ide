@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
   <title>Fleet Board Pro — Outlet</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -80,5 +84,6 @@
   <script>
     initDashboard('outlet').then(function (ctx) { if (ctx) initOutletPage(ctx); });
   </script>
+  <script src="js/pwa.js"></script>
 </body>
 </html>

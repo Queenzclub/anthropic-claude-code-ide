@@ -18,6 +18,9 @@
   --radius: 14px;
 }
 
+/* Native controls (selects, scrollbars) render dark to match the theme */
+:root { color-scheme: dark; }
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -73,6 +76,9 @@ code {
 
 .btn:active { transform: scale(0.98); }
 .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* No double-tap zoom delay on touch devices */
+.btn, .filter-btn { touch-action: manipulation; }
 
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-press); }
@@ -426,6 +432,10 @@ body.ready .loader { display: none; }
   gap: 0.75rem 1rem;
   flex-wrap: wrap;
   padding: 0.8rem 1rem;
+  /* Respect notches/status bars when installed as a PWA */
+  padding-top: calc(0.8rem + env(safe-area-inset-top, 0px));
+  padding-left: calc(1rem + env(safe-area-inset-left, 0px));
+  padding-right: calc(1rem + env(safe-area-inset-right, 0px));
   background: var(--bg-soft);
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -459,6 +469,7 @@ body.ready .loader { display: none; }
   max-width: 1000px;
   margin: 0 auto;
   padding: 1.25rem 1rem 3rem;
+  padding-bottom: calc(3rem + env(safe-area-inset-bottom, 0px));
 }
 
 .page-sub { margin: 0 0 1.25rem; }
@@ -498,8 +509,17 @@ body.ready .loader { display: none; }
 .driver-main .btn { min-height: 56px; font-size: 1.1rem; }
 
 @media (max-width: 480px) {
-  .topbar { padding: 0.7rem 0.75rem; }
+  .topbar {
+    padding: 0.7rem 0.75rem;
+    padding-top: calc(0.7rem + env(safe-area-inset-top, 0px));
+  }
   .brand { font-size: 1rem; }
-  .content { padding: 1rem 0.75rem 2.5rem; }
+  .content {
+    padding: 1rem 0.75rem 2.5rem;
+    padding-bottom: calc(2.5rem + env(safe-area-inset-bottom, 0px));
+  }
   .user-name { max-width: 34vw; }
+  .topbar .btn { min-height: 42px; padding: 0.45rem 0.9rem; font-size: 0.92rem; }
+  #vehicleMap { height: 260px; }
+  .request-actions .btn { min-width: 110px; }
 }
