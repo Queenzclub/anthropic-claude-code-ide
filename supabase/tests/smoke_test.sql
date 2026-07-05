@@ -226,4 +226,70 @@ select count(*) as outlet_sees from public.vehicle_requests where status in ('co
 select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
 select count(*) as driver_sees from public.vehicle_requests where status in ('completed', 'cancelled');
 reset role;
+
+-- ============ Admin management ============
+-- Attach the fresh signup to the company first (the documented manual
+-- step from supabase/README.md) so the admin can manage it.
+-- Clear the lingering JWT claim so this runs as a true superuser step.
+select set_config('request.jwt.claim.sub', '', false) \g /dev/null
+update public.profiles set company_id = '10000000-0000-0000-0000-000000000001'
+where user_id = 'c0000000-0000-0000-0000-000000000001';
+
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000001', false) \g /dev/null
+
+\echo 'TEST 22: admin creates outlet/driver/vehicle and manages a profile (expect INSERT x3 then 1 row x3)'
+insert into public.outlets (company_id, name, address) values
+  ('10000000-0000-0000-0000-000000000001', 'Admin Shop', '5 New St');
+insert into public.drivers (company_id, name, phone) values
+  ('10000000-0000-0000-0000-000000000001', 'Driver Three', '019-000');
+insert into public.vehicles (company_id, vehicle_name, plate_number) values
+  ('10000000-0000-0000-0000-000000000001', 'Van 5', 'NEW-555');
+update public.profiles
+set role = 'outlet', outlet_id = '30000000-0000-0000-0000-000000000001', active = true
+where user_id = 'c0000000-0000-0000-0000-000000000001'
+returning user_id;
+update public.profiles set active = false
+where user_id = 'c0000000-0000-0000-0000-000000000001'
+returning user_id;
+update public.outlets set phone = '03-123' where name = 'Admin Shop' returning id;
+
+\echo 'TEST 23: admin cannot manage another company (expect 0 rows, PASS, 0 rows)'
+update public.profiles set active = false
+where user_id = 'b0000000-0000-0000-0000-000000000001'
+returning user_id;
+do $$ begin
+  insert into public.outlets (company_id, name)
+  values ('20000000-0000-0000-0000-000000000001', 'Intruder Outlet');
+  raise exception 'FAIL: cross-company outlet insert allowed';
+exception when insufficient_privilege or check_violation then
+  raise notice 'PASS: cross-company outlet insert blocked';
+end $$;
+update public.vehicles set vehicle_name = 'Hacked'
+where id = '50000000-0000-0000-0000-00000000000b'
+returning id;
+
+reset role;
+-- Give veh1 an active job again to test the vehicle status guard.
+insert into public.vehicle_requests
+  (company_id, outlet_id, driver_id, vehicle_id, status, pickup_location, dropoff_location, requested_by)
+values
+  ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001',
+   '40000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000001',
+   'accepted', 'Shop', 'Docks', 'a0000000-0000-0000-0000-000000000002');
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000001', false) \g /dev/null
+
+\echo 'TEST 24: vehicle with active job cannot be set available (expect PASS), maintenance still allowed (expect 1 row)'
+do $$ begin
+  update public.vehicles set status = 'available'
+  where id = '50000000-0000-0000-0000-000000000001';
+  raise exception 'FAIL: freed a vehicle with an active job';
+exception when raise_exception then
+  raise notice 'PASS: vehicle status guarded -> %', sqlerrm;
+end $$;
+update public.vehicles set status = 'maintenance'
+where id = '50000000-0000-0000-0000-000000000001'
+returning id;
+reset role;
 \echo '=== ALL SMOKE TESTS DONE ==='
