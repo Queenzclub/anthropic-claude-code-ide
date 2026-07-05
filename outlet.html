@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <title>Fleet Board Pro — Outlet</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="loading">
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">🚚 Fleet Board Pro</div>
+      <div class="user-info">
+        <span id="userName" class="user-name"></span>
+        <span id="roleBadge" class="badge"></span>
+      </div>
+      <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
+    </header>
+
+    <main class="content">
+      <h2>Outlet Dashboard</h2>
+      <p class="muted page-sub"><span id="companyName"></span></p>
+
+      <div id="flash"></div>
+
+      <section class="panel">
+        <h3>➕ Request Vehicle</h3>
+        <form id="requestForm" class="form-grid" novalidate>
+          <div class="field">
+            <label for="pickup">Pickup location *</label>
+            <input id="pickup" required placeholder="Where should the driver collect?">
+          </div>
+          <div class="field">
+            <label for="dropoff">Drop-off location *</label>
+            <input id="dropoff" required placeholder="Where should it go?">
+          </div>
+          <div class="field">
+            <label for="customerName">Customer name</label>
+            <input id="customerName" placeholder="Customer or receiver name">
+          </div>
+          <div class="field">
+            <label for="customerContact">Customer contact</label>
+            <input id="customerContact" placeholder="Phone number">
+          </div>
+          <div class="field full">
+            <label for="notes">Delivery notes</label>
+            <textarea id="notes" placeholder="Items, quantity, special instructions…"></textarea>
+          </div>
+          <div class="full">
+            <button id="submitRequestBtn" class="btn btn-primary btn-block" type="submit">Request Vehicle</button>
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <div class="section-head">
+          <h3>📦 My Active Requests</h3>
+          <button id="refreshRequests" class="btn btn-outline btn-small" type="button">Refresh</button>
+        </div>
+        <div id="requestList" class="request-list"></div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🗂️ Request History</h3>
+        </div>
+        <div id="historyList" class="request-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="loader">Loading…</div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/outlet.js"></script>
+  <script>
+    initDashboard('outlet').then(function (ctx) { if (ctx) initOutletPage(ctx); });
+  </script>
+  <script src="js/pwa.js"></script>
+</body>
+</html>

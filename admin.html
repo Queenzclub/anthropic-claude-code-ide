@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <title>Fleet Board Pro — Admin</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="loading">
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">🚚 Fleet Board Pro</div>
+      <div class="user-info">
+        <span id="userName" class="user-name"></span>
+        <span id="roleBadge" class="badge"></span>
+      </div>
+      <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
+    </header>
+
+    <main class="content">
+      <h2>Admin Dashboard</h2>
+      <p class="muted page-sub"><span id="companyName"></span></p>
+
+      <div id="flash"></div>
+
+      <section>
+        <div class="section-head">
+          <h3>📊 Today Overview</h3>
+          <button id="refreshAll" class="btn btn-outline btn-small" type="button">Refresh</button>
+        </div>
+        <div id="overviewStats" class="stats"></div>
+      </section>
+
+      <section id="usersSection" style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🔑 Users</h3>
+        </div>
+        <p class="muted small">
+          Users sign up on the login page, then must be attached to your company
+          (see <code>supabase/README.md</code>) before they appear here. Creating
+          login accounts or attaching companies still happens in the Supabase
+          Dashboard / SQL Editor — never from this app.
+        </p>
+        <div id="userList" class="request-list"></div>
+      </section>
+
+      <section id="outletsSection" style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🏬 Outlets</h3>
+          <button class="btn btn-primary btn-small" type="button" data-action="new-outlet">Add Outlet</button>
+        </div>
+        <div id="outletFormHost"></div>
+        <div id="outletList" class="cards"></div>
+      </section>
+
+      <section id="driversSection" style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🚗 Drivers</h3>
+          <button class="btn btn-primary btn-small" type="button" data-action="new-driver">Add Driver</button>
+        </div>
+        <div id="driverFormHost"></div>
+        <div id="driverList" class="cards"></div>
+      </section>
+
+      <section id="vehiclesSection" style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🚐 Vehicles</h3>
+          <button class="btn btn-primary btn-small" type="button" data-action="new-vehicle">Add Vehicle</button>
+        </div>
+        <div id="vehicleFormHost"></div>
+        <div id="vehicleList" class="cards"></div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🗂️ Recent Jobs</h3>
+        </div>
+        <div id="jobFilters" class="filter-bar">
+          <button class="filter-btn active" type="button" data-status="all">All</button>
+          <button class="filter-btn" type="button" data-status="pending">Pending</button>
+          <button class="filter-btn" type="button" data-status="accepted">Accepted</button>
+          <button class="filter-btn" type="button" data-status="in_progress">In Progress</button>
+          <button class="filter-btn" type="button" data-status="completed">Completed</button>
+          <button class="filter-btn" type="button" data-status="cancelled">Cancelled</button>
+        </div>
+        <div id="jobList" class="request-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="loader">Loading…</div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/admin.js"></script>
+  <script>
+    initDashboard('admin').then(function (ctx) { if (ctx) initAdminPage(ctx); });
+  </script>
+  <script src="js/pwa.js"></script>
+</body>
+</html>

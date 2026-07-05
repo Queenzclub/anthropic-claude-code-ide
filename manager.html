@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <title>Fleet Board Pro — Manager</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="loading">
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">🚚 Fleet Board Pro</div>
+      <div class="user-info">
+        <span id="userName" class="user-name"></span>
+        <span id="roleBadge" class="badge"></span>
+      </div>
+      <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
+    </header>
+
+    <main class="content">
+      <h2>Manager Dashboard</h2>
+      <p class="muted page-sub"><span id="companyName"></span></p>
+
+      <div id="flash"></div>
+
+      <section>
+        <div class="section-head">
+          <h3>📊 Today</h3>
+        </div>
+        <div id="summaryStats" class="stats"></div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🕐 Pending Requests</h3>
+          <button id="refreshPending" class="btn btn-outline btn-small" type="button">Refresh</button>
+        </div>
+        <div id="pendingList" class="request-list"></div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🚚 Active Jobs</h3>
+        </div>
+        <div id="activeList" class="request-list"></div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🟢 Vehicle Status</h3>
+          <button id="refreshVehicles" class="btn btn-outline btn-small" type="button">Refresh</button>
+        </div>
+        <div id="vehicleStats" class="stats"></div>
+        <div id="vehicleList" class="cards" style="margin-top: 1rem;"></div>
+      </section>
+
+      <section class="panel" style="margin-top: 1.75rem;">
+        <h3>🗺️ Live Map</h3>
+        <div id="vehicleMap"></div>
+        <div id="mapEmpty" class="empty-state hidden" style="margin-top: 0.75rem;">No vehicle locations yet.</div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🗂️ Job History</h3>
+          <button id="refreshHistory" class="btn btn-outline btn-small" type="button">Refresh</button>
+        </div>
+        <div id="historyFilters" class="filter-bar">
+          <button class="filter-btn active" type="button" data-range="today">Today</button>
+          <button class="filter-btn" type="button" data-range="7d">Last 7 days</button>
+          <button class="filter-btn" type="button" data-range="all">All recent</button>
+          <span class="filter-sep"></span>
+          <button class="filter-btn active" type="button" data-status="all">All</button>
+          <button class="filter-btn" type="button" data-status="completed">Completed</button>
+          <button class="filter-btn" type="button" data-status="cancelled">Cancelled</button>
+        </div>
+        <div id="historyList" class="request-list"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="loader">Loading…</div>
+
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script src="vendor/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/manager.js"></script>
+  <script>
+    initDashboard('manager').then(function (ctx) { if (ctx) initManagerPage(ctx); });
+  </script>
+  <script src="js/pwa.js"></script>
+</body>
+</html>
