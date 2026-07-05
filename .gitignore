@@ -1,6 +1,6 @@
-# Real Supabase config (create from js/config.example.js).
-# Contains only public values, but kept out of the repo so each
-# environment uses its own project.
-js/config.js
+# js/config.js holds only PUBLIC values (project URL + anon key), so it
+# is committed for a simple zero-secret deploy. If you prefer to keep it
+# out of the repo and inject it from CI secrets instead, add js/config.js
+# back here and set the deploy workflow's SUPABASE_* secrets.
 
 .DS_Store
