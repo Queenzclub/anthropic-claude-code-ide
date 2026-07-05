@@ -21,22 +21,43 @@
       <h2>Outlet Dashboard</h2>
       <p class="muted page-sub"><span id="companyName"></span></p>
 
-      <section class="cards">
-        <div class="card">
-          <h3>➕ Request Vehicle</h3>
-          <p>Create a new delivery or pickup request.</p>
-          <span class="soon">Coming soon</span>
-        </div>
-        <div class="card">
+      <div id="flash"></div>
+
+      <section class="panel">
+        <h3>➕ Request Vehicle</h3>
+        <form id="requestForm" class="form-grid" novalidate>
+          <div class="field">
+            <label for="pickup">Pickup location *</label>
+            <input id="pickup" required placeholder="Where should the driver collect?">
+          </div>
+          <div class="field">
+            <label for="dropoff">Drop-off location *</label>
+            <input id="dropoff" required placeholder="Where should it go?">
+          </div>
+          <div class="field">
+            <label for="customerName">Customer name</label>
+            <input id="customerName" placeholder="Customer or receiver name">
+          </div>
+          <div class="field">
+            <label for="customerContact">Customer contact</label>
+            <input id="customerContact" placeholder="Phone number">
+          </div>
+          <div class="field full">
+            <label for="notes">Delivery notes</label>
+            <textarea id="notes" placeholder="Items, quantity, special instructions…"></textarea>
+          </div>
+          <div class="full">
+            <button id="submitRequestBtn" class="btn btn-primary btn-block" type="submit">Request Vehicle</button>
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <div class="section-head">
           <h3>📦 My Active Requests</h3>
-          <p>Track your pending and in-progress requests.</p>
-          <span class="soon">Coming soon</span>
+          <button id="refreshRequests" class="btn btn-outline btn-small" type="button">Refresh</button>
         </div>
-        <div class="card">
-          <h3>🗂️ History</h3>
-          <p>Completed and cancelled requests.</p>
-          <span class="soon">Coming soon</span>
-        </div>
+        <div id="requestList" class="request-list"></div>
       </section>
     </main>
   </div>
@@ -47,6 +68,10 @@
   <script src="js/config.js"></script>
   <script src="js/supabase-client.js"></script>
   <script src="js/auth.js"></script>
-  <script>initDashboard('outlet');</script>
+  <script src="js/ui.js"></script>
+  <script src="js/outlet.js"></script>
+  <script>
+    initDashboard('outlet').then(function (ctx) { if (ctx) initOutletPage(ctx); });
+  </script>
 </body>
 </html>

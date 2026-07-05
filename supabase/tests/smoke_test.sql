@@ -27,7 +27,8 @@ insert into public.drivers (id, company_id, name) values
 
 insert into public.vehicles (id, company_id, vehicle_name, plate_number, driver_id) values
   ('50000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Van 1', 'ABC-123',
-   '40000000-0000-0000-0000-000000000001');
+   '40000000-0000-0000-0000-000000000001'),
+  ('50000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'Van 2', 'XYZ-789', null);
 
 update public.profiles set company_id='10000000-0000-0000-0000-000000000001', role='admin',   active=true where user_id='a0000000-0000-0000-0000-000000000001';
 update public.profiles set company_id='10000000-0000-0000-0000-000000000001', role='manager', active=true where user_id='a0000000-0000-0000-0000-000000000002';
@@ -152,6 +153,20 @@ do $$ begin
   raise exception 'FAIL: anon can read';
 exception when insufficient_privilege then raise notice 'PASS: anon blocked';
 end $$;
+
+reset role;
+
+-- ============ Driver sees the vehicle of their active job ============
+\echo 'TEST 17: driver sees active-job vehicle even when not their default vehicle (expect 2)'
+insert into public.vehicle_requests
+  (company_id, outlet_id, driver_id, vehicle_id, status, pickup_location, dropoff_location, requested_by)
+values
+  ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001',
+   '40000000-0000-0000-0000-000000000001', '50000000-0000-0000-0000-000000000002',
+   'accepted', 'Shop', 'Airport', 'a0000000-0000-0000-0000-000000000002');
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+select count(*) as visible_vehicles from public.vehicles;
 
 reset role;
 \echo '=== ALL SMOKE TESTS DONE ==='

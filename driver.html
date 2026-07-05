@@ -21,13 +21,17 @@
       <h2>My Jobs</h2>
       <p class="muted page-sub"><span id="companyName"></span></p>
 
-      <section class="cards">
-        <div class="card">
+      <div id="flash"></div>
+
+      <section>
+        <div class="section-head">
           <h3>🚚 Current Job</h3>
-          <p>No job assigned yet. Your next job will appear here with
-             pickup and drop-off details.</p>
-          <span class="soon">Coming soon</span>
+          <button id="refreshJobs" class="btn btn-outline btn-small" type="button">Refresh</button>
         </div>
+        <div id="jobList" class="request-list"></div>
+      </section>
+
+      <section class="cards" style="margin-top: 1.75rem;">
         <div class="card">
           <h3>📍 My Location</h3>
           <p>Location sharing will be available here during trips.</p>
@@ -43,6 +47,10 @@
   <script src="js/config.js"></script>
   <script src="js/supabase-client.js"></script>
   <script src="js/auth.js"></script>
-  <script>initDashboard('driver');</script>
+  <script src="js/ui.js"></script>
+  <script src="js/driver.js"></script>
+  <script>
+    initDashboard('driver').then(function (ctx) { if (ctx) initDriverPage(ctx); });
+  </script>
 </body>
 </html>
