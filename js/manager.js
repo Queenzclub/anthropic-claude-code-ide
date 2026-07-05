@@ -37,7 +37,7 @@ function initManagerPage(ctx) {
   async function loadActive() {
     var res = await window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, created_at, driver_id, vehicle_id, outlets(name), drivers(name), vehicles(vehicle_name, plate_number)')
+      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, created_at, accepted_at, started_at, driver_id, vehicle_id, outlets(name), drivers(name), vehicles(vehicle_name, plate_number)')
       .in('status', ['accepted', 'in_progress'])
       .order('created_at', { ascending: true });
 
@@ -64,7 +64,7 @@ function initManagerPage(ctx) {
       var outletName = r.outlets && r.outlets.name;
       return requestCardHtml(r, {
         topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '',
-        extraHtml: chips,
+        extraHtml: chips + timesHtml(r),
       });
     }).join('');
   }

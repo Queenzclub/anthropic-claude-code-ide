@@ -59,6 +59,16 @@ function requestCardHtml(r, opts) {
   return html;
 }
 
+// One muted line with the job's lifecycle times (only the ones set).
+function timesHtml(r) {
+  var parts = [];
+  if (r.accepted_at) parts.push('🕐 Accepted ' + fmtTime(r.accepted_at));
+  if (r.started_at) parts.push('▶️ Started ' + fmtTime(r.started_at));
+  if (r.completed_at) parts.push('✅ Completed ' + fmtTime(r.completed_at));
+  if (!parts.length) return '';
+  return '<div class="meta">' + parts.map(escapeHtml).join(' · ') + '</div>';
+}
+
 // Shows a message in the page's #flash area. type: 'success' | 'error'.
 function showFlash(message, type) {
   var host = document.getElementById('flash');

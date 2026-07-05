@@ -96,8 +96,8 @@ insert into public.location_updates (company_id, driver_id, vehicle_id, lat, lng
 values ('10000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001',
         '50000000-0000-0000-0000-000000000001', 3.139, 101.6869);
 
-\echo 'TEST 9: location copied onto vehicle (expect 3.139 | t)'
-select last_lat, last_updated is not null as fresh from public.vehicles
+\echo 'TEST 9: location copied onto vehicle, vehicle stays busy during trip (expect busy | 3.139 | t)'
+select status, last_lat, last_updated is not null as fresh from public.vehicles
 where id='50000000-0000-0000-0000-000000000001';
 
 \echo 'TEST 10: driver cannot post location as another driver (expect PASS)'
@@ -168,5 +168,25 @@ set role authenticated;
 select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
 select count(*) as visible_vehicles from public.vehicles;
 
+\echo 'TEST 18: driver cannot change assignment fields on own job (expect PASS)'
+do $$ begin
+  update public.vehicle_requests
+  set vehicle_id = '50000000-0000-0000-0000-000000000001'
+  where status = 'accepted';
+  raise exception 'FAIL: driver changed vehicle_id';
+exception when raise_exception then
+  raise notice 'PASS: assignment locked -> %', sqlerrm;
+end $$;
+
+\echo 'TEST 19: driver can still start and complete that job (expect in_progress then completed | available)'
+update public.vehicle_requests set status = 'in_progress' where status = 'accepted';
+select status from public.vehicle_requests where vehicle_id = '50000000-0000-0000-0000-000000000002';
+update public.vehicle_requests set status = 'completed' where status = 'in_progress';
+
+-- Vehicle check as superuser: after completion the driver correctly
+-- loses visibility of that vehicle again (no more active job on it).
 reset role;
+select r.status, v.status as vehicle_status
+from public.vehicle_requests r join public.vehicles v on v.id = r.vehicle_id
+where r.vehicle_id = '50000000-0000-0000-0000-000000000002';
 \echo '=== ALL SMOKE TESTS DONE ==='

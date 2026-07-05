@@ -208,6 +208,7 @@ code {
 
 .btn-small { min-height: 38px; padding: 0.35rem 0.9rem; font-size: 0.9rem; }
 .btn-danger { background: var(--red); color: #fff; }
+.btn-success { background: var(--green); color: #fff; }
 
 .request-list { display: grid; gap: 0.9rem; }
 
