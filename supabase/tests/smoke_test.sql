@@ -205,4 +205,25 @@ exception when insufficient_privilege or check_violation then
   raise notice 'PASS: cross-company vehicle blocked';
 end $$;
 reset role;
+
+-- ============ History visibility per role ============
+-- Closed jobs so far: 2 completed for outlet 1 / driver 1. Add a second
+-- outlet with a cancelled request (no driver) to test outlet separation.
+\echo 'TEST 21: history — manager sees all company closed (3), outlet only own outlet (2), driver only own (2)'
+insert into public.outlets (id, company_id, name) values
+  ('30000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'Second Shop');
+insert into public.vehicle_requests
+  (company_id, outlet_id, status, pickup_location, dropoff_location, requested_by, cancellation_reason, cancelled_at)
+values
+  ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002',
+   'cancelled', 'Second Shop', 'Old Town', 'a0000000-0000-0000-0000-000000000002', 'Customer called off', now());
+
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000002', false) \g /dev/null
+select count(*) as manager_sees from public.vehicle_requests where status in ('completed', 'cancelled');
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', false) \g /dev/null
+select count(*) as outlet_sees from public.vehicle_requests where status in ('completed', 'cancelled');
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+select count(*) as driver_sees from public.vehicle_requests where status in ('completed', 'cancelled');
+reset role;
 \echo '=== ALL SMOKE TESTS DONE ==='

@@ -77,6 +77,48 @@ function initOutletPage(ctx) {
     loadRequests();
   });
 
-  document.getElementById('refreshRequests').addEventListener('click', loadRequests);
+  // Request history: this outlet's completed and cancelled requests.
+  // Same RLS as the active list — only their own outlet's rows come
+  // back. Driver/vehicle names stay private from outlets, so history
+  // shows "assigned" chips like the active list does.
+  var historyEl = document.getElementById('historyList');
+
+  async function loadHistory() {
+    var res = await window.sb
+      .from('vehicle_requests')
+      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, cancellation_reason, driver_id, vehicle_id, created_at, completed_at, cancelled_at')
+      .eq('outlet_id', profile.outlet_id)
+      .in('status', ['completed', 'cancelled'])
+      .order('updated_at', { ascending: false })
+      .limit(20);
+
+    if (res.error) {
+      historyEl.innerHTML = '<div class="empty-state">Could not load history. Please refresh.</div>';
+      return;
+    }
+    if (!res.data.length) {
+      historyEl.innerHTML = '<div class="empty-state">No recent history.</div>';
+      return;
+    }
+    historyEl.innerHTML = res.data.map(function (r) {
+      var extra = '';
+      if (r.driver_id) extra += '<span class="chip">👤 Driver assigned</span>';
+      if (r.vehicle_id) extra += '<span class="chip">🚐 Vehicle assigned</span>';
+      if (r.cancellation_reason) {
+        extra += '<div class="meta">💬 Reason: ' + escapeHtml(r.cancellation_reason) + '</div>';
+      }
+      var closed = r.completed_at
+        ? '✅ Completed ' + fmtTime(r.completed_at)
+        : (r.cancelled_at ? '🚫 Cancelled ' + fmtTime(r.cancelled_at) : '');
+      if (closed) extra += '<div class="meta">' + escapeHtml(closed) + '</div>';
+      return requestCardHtml(r, { extraHtml: extra });
+    }).join('');
+  }
+
+  document.getElementById('refreshRequests').addEventListener('click', function () {
+    loadRequests();
+    loadHistory();
+  });
   loadRequests();
+  loadHistory();
 }

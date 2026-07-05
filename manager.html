@@ -26,6 +26,13 @@
 
       <section>
         <div class="section-head">
+          <h3>📊 Today</h3>
+        </div>
+        <div id="summaryStats" class="stats"></div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
           <h3>🕐 Pending Requests</h3>
           <button id="refreshPending" class="btn btn-outline btn-small" type="button">Refresh</button>
         </div>
@@ -54,12 +61,21 @@
         <div id="mapEmpty" class="empty-state hidden" style="margin-top: 0.75rem;">No vehicle locations yet.</div>
       </section>
 
-      <section class="cards" style="margin-top: 1.75rem;">
-        <div class="card">
-          <h3>✅ Recent Completed</h3>
-          <p>Jobs finished today and recent history.</p>
-          <span class="soon">Coming soon</span>
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🗂️ Job History</h3>
+          <button id="refreshHistory" class="btn btn-outline btn-small" type="button">Refresh</button>
         </div>
+        <div id="historyFilters" class="filter-bar">
+          <button class="filter-btn active" type="button" data-range="today">Today</button>
+          <button class="filter-btn" type="button" data-range="7d">Last 7 days</button>
+          <button class="filter-btn" type="button" data-range="all">All recent</button>
+          <span class="filter-sep"></span>
+          <button class="filter-btn active" type="button" data-status="all">All</button>
+          <button class="filter-btn" type="button" data-status="completed">Completed</button>
+          <button class="filter-btn" type="button" data-status="cancelled">Cancelled</button>
+        </div>
+        <div id="historyList" class="request-list"></div>
       </section>
     </main>
   </div>

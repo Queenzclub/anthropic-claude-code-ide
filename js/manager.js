@@ -69,7 +69,104 @@ function initManagerPage(ctx) {
     }).join('');
   }
 
-  function loadAll() { loadPending(); loadActive(); loadVehicles(); }
+  function loadAll() { loadPending(); loadActive(); loadVehicles(); loadSummary(); loadHistory(); }
+
+  // ---------- Today summary + job history ----------
+  // History reads use the same staff RLS as everything else: the
+  // database only returns this company's rows. Filters are simple
+  // time/status narrowing on top; closed jobs never change, so
+  // updated_at is effectively the close time.
+
+  var HISTORY_LIMIT = 30;
+  var historyFilter = { range: 'today', status: 'all' };
+  var summaryEl = document.getElementById('summaryStats');
+  var historyEl = document.getElementById('historyList');
+
+  function rangeStartIso(range) {
+    if (range === 'today') {
+      var d = new Date();
+      d.setHours(0, 0, 0, 0);
+      return d.toISOString();
+    }
+    if (range === '7d') return new Date(Date.now() - 7 * 86400000).toISOString();
+    return null; // 'all recent' — just the limit applies
+  }
+
+  async function loadSummary() {
+    var closedRes = await window.sb
+      .from('vehicle_requests')
+      .select('id, status')
+      .in('status', ['completed', 'cancelled'])
+      .gte('updated_at', rangeStartIso('today'));
+    var activeRes = await window.sb
+      .from('vehicle_requests')
+      .select('id')
+      .in('status', ['accepted', 'in_progress']);
+    var availRes = await window.sb
+      .from('vehicles')
+      .select('id')
+      .eq('status', 'available')
+      .eq('active', true);
+
+    if (closedRes.error || activeRes.error || availRes.error) {
+      summaryEl.innerHTML = '<div class="empty-state">Could not load summary.</div>';
+      return;
+    }
+    var completedToday = closedRes.data.filter(function (r) { return r.status === 'completed'; }).length;
+    var cancelledToday = closedRes.data.length - completedToday;
+    var cells = [
+      [completedToday, 'Completed Today'],
+      [cancelledToday, 'Cancelled Today'],
+      [activeRes.data.length, 'Active Jobs'],
+      [availRes.data.length, 'Available Vehicles'],
+    ];
+    summaryEl.innerHTML = cells.map(function (c) {
+      return '<div class="stat"><div class="stat-num">' + c[0] + '</div>' +
+        '<div class="stat-label">' + c[1] + '</div></div>';
+    }).join('');
+  }
+
+  async function loadHistory() {
+    var statuses = historyFilter.status === 'all'
+      ? ['completed', 'cancelled']
+      : [historyFilter.status];
+
+    var q = window.sb
+      .from('vehicle_requests')
+      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, cancellation_reason, created_at, accepted_at, started_at, completed_at, cancelled_at, driver_id, vehicle_id, outlets(name), drivers(name), vehicles(vehicle_name, plate_number)')
+      .in('status', statuses);
+    var start = rangeStartIso(historyFilter.range);
+    if (start) q = q.gte('updated_at', start);
+    var res = await q.order('updated_at', { ascending: false }).limit(HISTORY_LIMIT);
+
+    if (res.error) {
+      historyEl.innerHTML = '<div class="empty-state">Could not load history. Please refresh.</div>';
+      return;
+    }
+    if (!res.data.length) {
+      historyEl.innerHTML = '<div class="empty-state">No recent history.</div>';
+      return;
+    }
+    historyEl.innerHTML = res.data.map(function (r) {
+      var extra = '';
+      if (r.drivers && r.drivers.name) {
+        extra += '<span class="chip">👤 ' + escapeHtml(r.drivers.name) + '</span>';
+      }
+      if (r.vehicles) {
+        extra += '<span class="chip">🚐 ' + escapeHtml(r.vehicles.vehicle_name) +
+                 ' · ' + escapeHtml(r.vehicles.plate_number) + '</span>';
+      }
+      if (r.cancellation_reason) {
+        extra += '<div class="meta">💬 Reason: ' + escapeHtml(r.cancellation_reason) + '</div>';
+      }
+      extra += timesHtml(r);
+      var outletName = r.outlets && r.outlets.name;
+      return requestCardHtml(r, {
+        topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '',
+        extraHtml: extra,
+      });
+    }).join('');
+  }
 
   // ---------- Vehicle status overview + map ----------
   // Vehicles come pre-scoped to the manager's company by RLS. The map
@@ -323,6 +420,24 @@ function initManagerPage(ctx) {
 
   document.getElementById('refreshPending').addEventListener('click', loadAll);
   document.getElementById('refreshVehicles').addEventListener('click', loadVehicles);
+  document.getElementById('refreshHistory').addEventListener('click', function () {
+    loadSummary();
+    loadHistory();
+  });
+
+  // One active button per filter group (time range / status).
+  document.getElementById('historyFilters').addEventListener('click', function (e) {
+    var btn = e.target.closest('.filter-btn');
+    if (!btn) return;
+    var group = btn.hasAttribute('data-range') ? 'range' : 'status';
+    historyFilter[group] = btn.getAttribute('data-' + group);
+    document.querySelectorAll('#historyFilters .filter-btn[data-' + group + ']').forEach(function (b) {
+      b.classList.remove('active');
+    });
+    btn.classList.add('active');
+    loadHistory();
+  });
+
   // Light polling keeps the overview fresh without realtime complexity.
   setInterval(loadVehicles, 60000);
   loadAll();

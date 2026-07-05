@@ -84,10 +84,12 @@ function initDriverPage(ctx) {
     if (!res.data || !res.data.length) {
       showFlash('This job is no longer active.', 'error');
       loadJobs();
+      loadRecent();
       return;
     }
     showFlash(successMsg, 'success');
     loadJobs();
+    loadRecent();
   }
 
   jobsEl.addEventListener('click', function (e) {
@@ -204,7 +206,48 @@ function initDriverPage(ctx) {
     else startSharing();
   });
 
+  // ---------- Recent jobs (history) ----------
+  // The driver's own completed/cancelled jobs. The vehicle name only
+  // appears when RLS still allows reading that vehicle (their default
+  // vehicle) — visibility of other vehicles correctly ends with the job.
+  var recentEl = document.getElementById('recentList');
+
+  async function loadRecent() {
+    var res = await window.sb
+      .from('vehicle_requests')
+      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, completed_at, cancelled_at, vehicles(vehicle_name, plate_number)')
+      .eq('driver_id', profile.driver_id)
+      .in('status', ['completed', 'cancelled'])
+      .order('updated_at', { ascending: false })
+      .limit(10);
+
+    if (res.error) {
+      recentEl.innerHTML = '<div class="empty-state">Could not load recent jobs. Please refresh.</div>';
+      return;
+    }
+    if (!res.data.length) {
+      recentEl.innerHTML = '<div class="empty-state">No recent history.</div>';
+      return;
+    }
+    recentEl.innerHTML = res.data.map(function (r) {
+      var extra = '';
+      if (r.vehicles) {
+        extra += '<span class="chip">🚐 ' + escapeHtml(r.vehicles.vehicle_name) +
+                 ' · ' + escapeHtml(r.vehicles.plate_number) + '</span>';
+      }
+      var closed = r.completed_at
+        ? '✅ Completed ' + fmtTime(r.completed_at)
+        : (r.cancelled_at ? '🚫 Cancelled ' + fmtTime(r.cancelled_at) : '');
+      if (closed) extra += '<div class="meta">' + escapeHtml(closed) + '</div>';
+      return requestCardHtml(r, { extraHtml: extra });
+    }).join('');
+  }
+
   renderSharingState();
-  document.getElementById('refreshJobs').addEventListener('click', loadJobs);
+  document.getElementById('refreshJobs').addEventListener('click', function () {
+    loadJobs();
+    loadRecent();
+  });
   loadJobs();
+  loadRecent();
 }
