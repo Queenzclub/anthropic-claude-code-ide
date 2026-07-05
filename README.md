@@ -62,6 +62,22 @@ testing on `http://localhost` is fine; production hosting must be HTTPS
 (most static hosts — Netlify, Vercel, Cloudflare Pages, GitHub Pages —
 provide it automatically). HTTPS is also required for PWA install.
 
+## Deploy to GitHub Pages (built in)
+
+This repo ships with `.github/workflows/deploy-pages.yml`, which publishes
+the app to GitHub Pages (free HTTPS hosting) on every push to `main`:
+
+1. Repo **Settings → Secrets and variables → Actions** → add two secrets:
+   `SUPABASE_URL` and `SUPABASE_ANON_KEY` (anon key only — these are
+   public values; the secret store just keeps them out of the code).
+2. Push to `main` (or run the workflow manually from the Actions tab).
+3. The site appears at `https://<owner>.github.io/<repo>/`.
+
+Notes: the repository must be public for free GitHub Pages, and the
+workflow generates `js/config.js` at deploy time so nothing is committed.
+Any other static host (Netlify, Vercel, Cloudflare Pages) also works —
+just upload the files and create `js/config.js` there manually.
+
 ## Install as an app (PWA)
 
 On a phone, open the site in the browser, then:
