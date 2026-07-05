@@ -189,4 +189,20 @@ reset role;
 select r.status, v.status as vehicle_status
 from public.vehicle_requests r join public.vehicles v on v.id = r.vehicle_id
 where r.vehicle_id = '50000000-0000-0000-0000-000000000002';
+
+-- ============ Cross-company location protection ============
+\echo 'TEST 20: driver cannot attach location to another company vehicle (expect PASS)'
+insert into public.vehicles (id, company_id, vehicle_name, plate_number) values
+  ('50000000-0000-0000-0000-00000000000b', '20000000-0000-0000-0000-000000000001', 'B Van', 'BBB-111');
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+do $$ begin
+  insert into public.location_updates (company_id, driver_id, vehicle_id, lat, lng)
+  values ('10000000-0000-0000-0000-000000000001', '40000000-0000-0000-0000-000000000001',
+          '50000000-0000-0000-0000-00000000000b', 1, 1);
+  raise exception 'FAIL: cross-company vehicle location allowed';
+exception when insufficient_privilege or check_violation then
+  raise notice 'PASS: cross-company vehicle blocked';
+end $$;
+reset role;
 \echo '=== ALL SMOKE TESTS DONE ==='

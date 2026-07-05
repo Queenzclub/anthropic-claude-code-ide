@@ -271,6 +271,51 @@ code {
   border-radius: var(--radius);
 }
 
+/* ---------- Vehicle overview & map (manager) ---------- */
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+
+.stat {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.stat-num { font-size: 1.6rem; font-weight: 700; line-height: 1.2; }
+.stat-label { color: var(--muted); font-size: 0.85rem; }
+
+/* Location freshness chips (display-only labels) */
+.fresh-live    { color: #8fe6b8; border-color: rgba(47, 191, 113, 0.5); }
+.fresh-old     { color: #ffd08a; border-color: rgba(240, 160, 32, 0.5); }
+.fresh-offline { color: #ffb3b5; border-color: rgba(229, 72, 77, 0.45); }
+
+#vehicleMap {
+  height: 320px;
+  border-radius: 12px;
+  z-index: 0; /* keep below the sticky topbar */
+}
+
+/* Soften the light map tiles to sit better in the dark theme */
+#vehicleMap .leaflet-tile-pane { filter: grayscale(30%) brightness(85%); }
+
+/* Dark-theme map popups (Leaflet defaults to white-on-white here) */
+#vehicleMap .leaflet-popup-content-wrapper,
+#vehicleMap .leaflet-popup-tip {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
 /* ---------- Login page ---------- */
 
 .login-wrap {

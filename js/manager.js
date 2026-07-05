@@ -69,7 +69,105 @@ function initManagerPage(ctx) {
     }).join('');
   }
 
-  function loadAll() { loadPending(); loadActive(); }
+  function loadAll() { loadPending(); loadActive(); loadVehicles(); }
+
+  // ---------- Vehicle status overview + map ----------
+  // Vehicles come pre-scoped to the manager's company by RLS. The map
+  // only shows vehicles with a stored location; freshness labels are
+  // display-only (the stored status is never changed from here).
+
+  var statsEl = document.getElementById('vehicleStats');
+  var vehiclesEl = document.getElementById('vehicleList');
+  var map = null;
+  var markersLayer = null;
+  var mapFitted = false;
+
+  function vehicleCardHtml(v) {
+    var fresh = locationFreshness(v.last_updated);
+    return '<div class="card">' +
+      '<div class="request-top"><strong>' + escapeHtml(v.vehicle_name) + '</strong>' +
+        statusBadge(v.status) + '</div>' +
+      '<div class="meta">🔖 ' + escapeHtml(v.plate_number) + '</div>' +
+      '<div class="meta">👤 ' + (v.drivers ? escapeHtml(v.drivers.name) : 'No driver assigned') + '</div>' +
+      '<div class="meta">🕐 ' + (v.last_updated ? 'Updated ' + escapeHtml(fmtTime(v.last_updated)) : 'No location yet') + '</div>' +
+      '<span class="chip fresh-' + fresh.cls + '">' + escapeHtml(fresh.label) + '</span>' +
+    '</div>';
+  }
+
+  function renderMap(vehicles) {
+    var mapEl = document.getElementById('vehicleMap');
+    var emptyEl = document.getElementById('mapEmpty');
+    if (!window.L) {
+      mapEl.classList.add('hidden');
+      emptyEl.textContent = 'Map could not be loaded.';
+      emptyEl.classList.remove('hidden');
+      return;
+    }
+    if (!map) {
+      map = L.map('vehicleMap');
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19,
+      }).addTo(map);
+      markersLayer = L.layerGroup().addTo(map);
+      map.setView([3.139, 101.6869], 11);
+    }
+    markersLayer.clearLayers();
+
+    var located = vehicles.filter(function (v) {
+      return v.last_lat != null && v.last_lng != null;
+    });
+    if (!located.length) {
+      emptyEl.textContent = 'No vehicle locations yet.';
+      emptyEl.classList.remove('hidden');
+      return;
+    }
+    emptyEl.classList.add('hidden');
+
+    var bounds = [];
+    located.forEach(function (v) {
+      var fresh = locationFreshness(v.last_updated);
+      var popup = '<strong>' + escapeHtml(v.vehicle_name) + '</strong> · ' +
+        escapeHtml(v.plate_number) + '<br>' +
+        'Status: ' + escapeHtml(STATUS_LABELS[v.status] || v.status) + '<br>' +
+        (v.drivers ? 'Driver: ' + escapeHtml(v.drivers.name) + '<br>' : '') +
+        'Updated: ' + escapeHtml(fmtTime(v.last_updated)) + ' (' + escapeHtml(fresh.label) + ')';
+      markersLayer.addLayer(L.marker([v.last_lat, v.last_lng]).bindPopup(popup));
+      bounds.push([v.last_lat, v.last_lng]);
+    });
+    if (!mapFitted) {
+      map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+      mapFitted = true;
+    }
+  }
+
+  async function loadVehicles() {
+    var res = await window.sb
+      .from('vehicles')
+      .select('id, vehicle_name, plate_number, status, last_lat, last_lng, last_updated, drivers(name)')
+      .eq('active', true)
+      .order('vehicle_name', { ascending: true });
+
+    if (res.error) {
+      vehiclesEl.innerHTML = '<div class="empty-state">Could not load vehicles. Please refresh.</div>';
+      return;
+    }
+
+    var counts = { available: 0, busy: 0, offline: 0, maintenance: 0 };
+    res.data.forEach(function (v) {
+      if (counts[v.status] != null) counts[v.status] += 1;
+    });
+    statsEl.innerHTML = Object.keys(counts).map(function (k) {
+      return '<div class="stat"><div class="stat-num">' + counts[k] + '</div>' +
+        '<div class="stat-label">' + STATUS_LABELS[k] + '</div></div>';
+    }).join('');
+
+    vehiclesEl.innerHTML = res.data.length
+      ? res.data.map(vehicleCardHtml).join('')
+      : '<div class="empty-state">No vehicles yet.</div>';
+
+    renderMap(res.data);
+  }
 
   function closePanels() {
     pendingEl.querySelectorAll('[data-panel]').forEach(function (p) { p.remove(); });
@@ -224,5 +322,8 @@ function initManagerPage(ctx) {
   });
 
   document.getElementById('refreshPending').addEventListener('click', loadAll);
+  document.getElementById('refreshVehicles').addEventListener('click', loadVehicles);
+  // Light polling keeps the overview fresh without realtime complexity.
+  setInterval(loadVehicles, 60000);
   loadAll();
 }

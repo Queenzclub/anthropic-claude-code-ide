@@ -7,6 +7,10 @@ var STATUS_LABELS = {
   in_progress: 'In Progress',
   completed: 'Completed',
   cancelled: 'Cancelled',
+  available: 'Available',
+  busy: 'Busy',
+  offline: 'Offline',
+  maintenance: 'Maintenance',
 };
 
 // Always escape user-entered text before putting it in HTML.
@@ -57,6 +61,17 @@ function requestCardHtml(r, opts) {
   if (opts.actionsHtml) html += '<div class="request-actions">' + opts.actionsHtml + '</div>';
   html += '</article>';
   return html;
+}
+
+// Location freshness for display only — the stored vehicle status is
+// never changed from the frontend. Live <= 5 min, old <= 30 min,
+// offline beyond that.
+function locationFreshness(lastUpdated) {
+  if (!lastUpdated) return { label: 'No location yet', cls: 'none' };
+  var mins = (Date.now() - new Date(lastUpdated).getTime()) / 60000;
+  if (mins <= 5) return { label: 'Live', cls: 'live' };
+  if (mins <= 30) return { label: 'Old location', cls: 'old' };
+  return { label: 'Offline', cls: 'offline' };
 }
 
 // One muted line with the job's lifecycle times (only the ones set).

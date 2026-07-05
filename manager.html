@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Fleet Board Pro — Manager</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="loading">
@@ -38,17 +39,22 @@
         <div id="activeList" class="request-list"></div>
       </section>
 
-      <section class="cards" style="margin-top: 1.75rem;">
-        <div class="card">
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
           <h3>🟢 Vehicle Status</h3>
-          <p>Available, busy, and offline vehicles at a glance.</p>
-          <span class="soon">Coming soon</span>
+          <button id="refreshVehicles" class="btn btn-outline btn-small" type="button">Refresh</button>
         </div>
-        <div class="card">
-          <h3>🗺️ Live Locations</h3>
-          <p>See where your drivers are on the map.</p>
-          <span class="soon">Coming soon</span>
-        </div>
+        <div id="vehicleStats" class="stats"></div>
+        <div id="vehicleList" class="cards" style="margin-top: 1rem;"></div>
+      </section>
+
+      <section class="panel" style="margin-top: 1.75rem;">
+        <h3>🗺️ Live Map</h3>
+        <div id="vehicleMap"></div>
+        <div id="mapEmpty" class="empty-state hidden" style="margin-top: 0.75rem;">No vehicle locations yet.</div>
+      </section>
+
+      <section class="cards" style="margin-top: 1.75rem;">
         <div class="card">
           <h3>✅ Recent Completed</h3>
           <p>Jobs finished today and recent history.</p>
@@ -60,6 +66,7 @@
 
   <div class="loader">Loading…</div>
 
+  <script src="vendor/leaflet/leaflet.js"></script>
   <script src="vendor/supabase.js"></script>
   <script src="js/config.js"></script>
   <script src="js/supabase-client.js"></script>
