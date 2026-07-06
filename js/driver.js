@@ -9,12 +9,85 @@
 function initDriverPage(ctx) {
   var profile = ctx.profile;
   var jobsEl = document.getElementById('jobList');
+  var availableEl = document.getElementById('availableList');
   var activeJobs = [];
+  var myVehicleId = null;
 
   if (!profile.driver_id) {
     jobsEl.innerHTML = '<div class="empty-state">Your account is not linked to a driver record yet. Please contact your admin.</div>';
+    if (availableEl) availableEl.innerHTML = '';
     return;
   }
+
+  // The driver's own vehicle (RLS: a driver may read their own vehicle).
+  async function loadMyVehicle() {
+    var res = await window.sb.from('vehicles')
+      .select('id').eq('driver_id', profile.driver_id).eq('active', true).limit(1);
+    myVehicleId = (!res.error && res.data && res.data.length) ? res.data[0].id : null;
+  }
+
+  // ---------- Available requests (dispatch inbox) ----------
+  // RLS returns only pending requests dispatched to this driver: open
+  // company requests, or ones specifically targeted at them.
+  async function loadAvailable() {
+    var res = await window.sb
+      .from('vehicle_requests')
+      .select('id, status, dispatch_mode, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, outlets(name)')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true });
+
+    if (res.error) {
+      availableEl.innerHTML = '<div class="empty-state">Could not load requests. Please refresh.</div>';
+      return;
+    }
+    if (!res.data.length) {
+      availableEl.innerHTML = '<div class="empty-state">No available requests right now.</div>';
+      return;
+    }
+    availableEl.innerHTML = res.data.map(function (r) {
+      var mode = r.dispatch_mode === 'specific'
+        ? '<span class="chip">🎯 For you</span>'
+        : '<span class="chip">📢 Open request</span>';
+      var outletName = r.outlets && r.outlets.name;
+      return requestCardHtml(r, {
+        topLine: (outletName ? '🏬 ' + escapeHtml(outletName) + ' ' : '') + mode,
+        actionsHtml: '<button class="btn btn-primary btn-block" type="button" data-action="accept">Accept Job</button>',
+      });
+    }).join('');
+  }
+
+  async function acceptJob(id, btn) {
+    btn.disabled = true;
+    var res = await window.sb
+      .from('vehicle_requests')
+      .update({ status: 'accepted', driver_id: profile.driver_id, vehicle_id: myVehicleId })
+      .eq('id', id)
+      .eq('status', 'pending')
+      .select('id');
+
+    if (res.error) {
+      btn.disabled = false;
+      if (res.error.code === '23505') {
+        showFlash('You already have an active job on this vehicle.', 'error');
+      } else {
+        showFlash('Could not accept the job. Please try again.', 'error');
+      }
+      return;
+    }
+    if (!res.data || !res.data.length) {
+      showFlash('This request was already taken.', 'error');
+    } else {
+      showFlash('Job accepted', 'success');
+    }
+    loadAvailable();
+    loadJobs();
+  }
+
+  availableEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-action="accept"]');
+    if (!btn) return;
+    acceptJob(btn.closest('.request-card').getAttribute('data-id'), btn);
+  });
 
   async function loadJobs() {
     var res = await window.sb
@@ -245,9 +318,13 @@ function initDriverPage(ctx) {
 
   renderSharingState();
   document.getElementById('refreshJobs').addEventListener('click', function () {
+    loadAvailable();
     loadJobs();
     loadRecent();
   });
-  loadJobs();
-  loadRecent();
+  loadMyVehicle().then(function () {
+    loadAvailable();
+    loadJobs();
+    loadRecent();
+  });
 }

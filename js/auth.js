@@ -11,7 +11,7 @@ var ROLE_PAGES = {
 var ROLE_LABELS = {
   admin: 'Admin',
   manager: 'Manager',
-  outlet: 'Outlet Staff',
+  outlet: 'Outlet',
   driver: 'Driver',
 };
 
@@ -97,6 +97,12 @@ async function applyChrome(ctx) {
   if (badgeEl) {
     badgeEl.textContent = ROLE_LABELS[profile.role];
     badgeEl.classList.add('badge-role-' + profile.role);
+    // Outlet accounts show their shop name instead of a generic label.
+    if (profile.role === 'outlet' && profile.outlet_id) {
+      var outletRes = await window.sb
+        .from('outlets').select('name').eq('id', profile.outlet_id).maybeSingle();
+      if (outletRes.data && outletRes.data.name) badgeEl.textContent = outletRes.data.name;
+    }
   }
 
   if (companyEl && profile.company_id) {

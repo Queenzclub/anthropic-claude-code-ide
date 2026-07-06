@@ -19,7 +19,6 @@
         <span id="roleBadge" class="badge"></span>
       </div>
       <a class="btn btn-outline btn-small" href="profile.html">Profile</a>
-      <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
     </header>
 
     <main class="content driver-main">
@@ -30,8 +29,15 @@
 
       <section>
         <div class="section-head">
-          <h3>🚚 Current Job</h3>
+          <h3>📥 Available Requests</h3>
           <button id="refreshJobs" class="btn btn-outline btn-small" type="button">Refresh</button>
+        </div>
+        <div id="availableList" class="request-list"></div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🚚 Current Jobs</h3>
         </div>
         <div id="jobList" class="request-list"></div>
       </section>

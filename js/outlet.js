@@ -89,6 +89,35 @@ function initOutletPage(ctx) {
     else map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
   }
 
+  // Today summary cards.
+  async function updateSummary(active, vehiclesById) {
+    var pending = active.filter(function (r) { return r.status === 'pending'; }).length;
+    var moving = active.filter(function (r) { return r.status === 'accepted' || r.status === 'in_progress'; }).length;
+    var onTheWay = active.filter(function (r) {
+      return r.vehicle_id && vehiclesById[r.vehicle_id];
+    }).length;
+
+    var doneRes = await window.sb
+      .from('vehicle_requests')
+      .select('id')
+      .eq('outlet_id', profile.outlet_id)
+      .eq('status', 'completed')
+      .gte('updated_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
+    var completedToday = (!doneRes.error && doneRes.data) ? doneRes.data.length : 0;
+
+    var host = document.getElementById('summaryStats');
+    var tiles = [
+      [moving, 'Active Deliveries'],
+      [pending, 'Waiting Pickup'],
+      [onTheWay, 'On the Way'],
+      [completedToday, 'Completed Today'],
+    ];
+    host.innerHTML = tiles.map(function (t) {
+      return '<div class="stat"><div class="stat-num">' + t[0] + '</div>' +
+        '<div class="stat-label">' + t[1] + '</div></div>';
+    }).join('');
+  }
+
   async function loadRequests() {
     var res = await window.sb
       .from('vehicle_requests')
@@ -103,8 +132,9 @@ function initOutletPage(ctx) {
     }
     window.__activeRequests = res.data;
     if (!res.data.length) {
-      listEl.innerHTML = '<div class="empty-state">No active requests. Create one above.</div>';
+      listEl.innerHTML = '<div class="empty-state">No active deliveries. Tap Request Vehicle to start one.</div>';
       renderTrackMap([]);
+      updateSummary([], {});
       return;
     }
 
@@ -132,6 +162,7 @@ function initOutletPage(ctx) {
 
     var trackable = Object.keys(vehiclesById).map(function (k) { return vehiclesById[k]; });
     renderTrackMap(trackable);
+    updateSummary(res.data, vehiclesById);
   }
 
   form.addEventListener('submit', async function (e) {
@@ -145,11 +176,14 @@ function initOutletPage(ctx) {
     }
 
     submitBtn.disabled = true;
+    // Outlet requests are OPEN dispatch: sent to all on-duty drivers,
+    // first one to accept takes it. (Outlets don't pick vehicles.)
     var res = await window.sb.from('vehicle_requests').insert({
       company_id: profile.company_id,
       outlet_id: profile.outlet_id,
       requested_by: profile.user_id,
       status: 'pending',
+      dispatch_mode: 'open',
       pickup_location: pickup,
       dropoff_location: dropoff,
       customer_name: val('customerName') || null,
@@ -164,8 +198,20 @@ function initOutletPage(ctx) {
     }
 
     form.reset();
-    showFlash('Vehicle request created successfully.', 'success');
+    document.getElementById('requestFormHost').classList.add('hidden');
+    showFlash('Request sent to available drivers.', 'success');
     loadRequests();
+  });
+
+  // Collapsible request form.
+  var formHost = document.getElementById('requestFormHost');
+  document.getElementById('toggleRequestBtn').addEventListener('click', function () {
+    formHost.classList.toggle('hidden');
+    if (!formHost.classList.contains('hidden')) document.getElementById('pickup').focus();
+  });
+  document.getElementById('cancelRequestBtn').addEventListener('click', function () {
+    form.reset();
+    formHost.classList.add('hidden');
   });
 
   // Request history: this outlet's completed and cancelled requests.
