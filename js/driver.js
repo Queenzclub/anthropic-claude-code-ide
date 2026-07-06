@@ -92,7 +92,7 @@ function initDriverPage(ctx) {
   async function loadJobs() {
     var res = await window.sb
       .from('vehicle_requests')
-      .select('id, status, vehicle_id, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, accepted_at, started_at, completed_at, outlets(name), vehicles(vehicle_name, plate_number)')
+      .select('id, status, vehicle_id, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, accepted_at, started_at, completed_at, outlets(name), vehicles!vehicle_id(vehicle_name, plate_number)')
       .eq('driver_id', profile.driver_id)
       .in('status', ['accepted', 'in_progress'])
       .order('created_at', { ascending: true });
@@ -288,7 +288,7 @@ function initDriverPage(ctx) {
   async function loadRecent() {
     var res = await window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, completed_at, cancelled_at, vehicles(vehicle_name, plate_number)')
+      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, completed_at, cancelled_at, vehicles!vehicle_id(vehicle_name, plate_number)')
       .eq('driver_id', profile.driver_id)
       .in('status', ['completed', 'cancelled'])
       .order('updated_at', { ascending: false })
