@@ -37,7 +37,7 @@ function initManagerPage(ctx) {
   async function loadActive() {
     var res = await window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, created_at, accepted_at, started_at, driver_id, vehicle_id, outlets(name), drivers(name), vehicles(vehicle_name, plate_number)')
+      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, created_at, accepted_at, started_at, driver_id, vehicle_id, outlets(name), drivers!driver_id(name), vehicles!vehicle_id(vehicle_name, plate_number)')
       .in('status', ['accepted', 'in_progress'])
       .order('created_at', { ascending: true });
 
@@ -133,7 +133,7 @@ function initManagerPage(ctx) {
 
     var q = window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, cancellation_reason, created_at, accepted_at, started_at, completed_at, cancelled_at, driver_id, vehicle_id, outlets(name), drivers(name), vehicles(vehicle_name, plate_number)')
+      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, cancellation_reason, created_at, accepted_at, started_at, completed_at, cancelled_at, driver_id, vehicle_id, outlets(name), drivers!driver_id(name), vehicles!vehicle_id(vehicle_name, plate_number)')
       .in('status', statuses);
     var start = rangeStartIso(historyFilter.range);
     if (start) q = q.gte('updated_at', start);

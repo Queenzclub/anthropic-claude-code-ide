@@ -414,7 +414,7 @@ function initAdminPage(ctx) {
   async function loadJobs() {
     var q = window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, cancellation_reason, created_at, accepted_at, started_at, completed_at, cancelled_at, outlets(name), drivers(name), vehicles(vehicle_name, plate_number)');
+      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, cancellation_reason, created_at, accepted_at, started_at, completed_at, cancelled_at, outlets(name), drivers!driver_id(name), vehicles!vehicle_id(vehicle_name, plate_number)');
     if (jobFilter !== 'all') q = q.eq('status', jobFilter);
     var res = await q.order('updated_at', { ascending: false }).limit(20);
 
