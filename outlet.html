@@ -8,6 +8,7 @@
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
   <title>Fleet Board Pro — Outlet</title>
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="loading">
@@ -18,6 +19,7 @@
         <span id="userName" class="user-name"></span>
         <span id="roleBadge" class="badge"></span>
       </div>
+      <a class="btn btn-outline btn-small" href="profile.html">Profile</a>
       <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
     </header>
 
@@ -64,6 +66,14 @@
         <div id="requestList" class="request-list"></div>
       </section>
 
+      <section class="panel" style="margin-top: 1.75rem;">
+        <h3>🗺️ Track My Deliveries</h3>
+        <div id="trackMap"></div>
+        <div id="trackEmpty" class="empty-state" style="margin-top: 0.75rem;">
+          No vehicle to track yet. A map appears here when a driver is on the way for one of your active requests.
+        </div>
+      </section>
+
       <section style="margin-top: 1.75rem;">
         <div class="section-head">
           <h3>🗂️ Request History</h3>
@@ -75,6 +85,7 @@
 
   <div class="loader">Loading…</div>
 
+  <script src="vendor/leaflet/leaflet.js"></script>
   <script src="vendor/supabase.js"></script>
   <script src="js/config.js"></script>
   <script src="js/supabase-client.js"></script>

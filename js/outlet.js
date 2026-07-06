@@ -17,6 +17,78 @@ function initOutletPage(ctx) {
 
   function val(id) { return document.getElementById(id).value.trim(); }
 
+  // ---------- Delivery tracking map (own active deliveries only) ----------
+  // RLS migration 8 lets an outlet read a vehicle row only while it is on
+  // an active job for their own outlet — so this only ever shows the van
+  // bringing their own delivery.
+  var map = null;
+  var markersLayer = null;
+
+  async function loadTrackedVehicles() {
+    var ids = [];
+    (window.__activeRequests || []).forEach(function (r) {
+      if (r.vehicle_id && (r.status === 'accepted' || r.status === 'in_progress')) {
+        if (ids.indexOf(r.vehicle_id) === -1) ids.push(r.vehicle_id);
+      }
+    });
+    if (!ids.length) return {};
+    var res = await window.sb
+      .from('vehicles')
+      .select('id, vehicle_name, plate_number, last_lat, last_lng, last_updated')
+      .in('id', ids);
+    var byId = {};
+    if (!res.error && res.data) res.data.forEach(function (v) { byId[v.id] = v; });
+    return byId;
+  }
+
+  function renderTrackMap(vehicles) {
+    var mapEl = document.getElementById('trackMap');
+    var emptyEl = document.getElementById('trackEmpty');
+    var located = vehicles.filter(function (v) { return v && v.last_lat != null && v.last_lng != null; });
+
+    if (!vehicles.length) {
+      if (mapEl) mapEl.classList.add('hidden');
+      emptyEl.textContent = 'No vehicle to track yet. A map appears here when a driver is on the way for one of your active requests.';
+      emptyEl.classList.remove('hidden');
+      return;
+    }
+    if (!located.length) {
+      if (mapEl) mapEl.classList.add('hidden');
+      emptyEl.textContent = 'Your delivery is assigned, but the driver has not shared a location yet.';
+      emptyEl.classList.remove('hidden');
+      return;
+    }
+    if (!window.L) {
+      if (mapEl) mapEl.classList.add('hidden');
+      emptyEl.textContent = 'Map could not be loaded.';
+      emptyEl.classList.remove('hidden');
+      return;
+    }
+    emptyEl.classList.add('hidden');
+    if (mapEl) mapEl.classList.remove('hidden');
+
+    if (!map) {
+      map = L.map('trackMap');
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+      }).addTo(map);
+      markersLayer = L.layerGroup().addTo(map);
+      map.setView([3.139, 101.6869], 12);
+    }
+    markersLayer.clearLayers();
+    var bounds = [];
+    located.forEach(function (v) {
+      var fresh = locationFreshness(v.last_updated);
+      var popup = '<strong>' + escapeHtml(v.vehicle_name) + '</strong> · ' + escapeHtml(v.plate_number) +
+        '<br>Updated: ' + escapeHtml(fmtTime(v.last_updated)) + ' (' + escapeHtml(fresh.label) + ')';
+      markersLayer.addLayer(L.marker([v.last_lat, v.last_lng]).bindPopup(popup));
+      bounds.push([v.last_lat, v.last_lng]);
+    });
+    map.invalidateSize();
+    if (bounds.length === 1) map.setView(bounds[0], 14);
+    else map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+  }
+
   async function loadRequests() {
     var res = await window.sb
       .from('vehicle_requests')
@@ -29,18 +101,37 @@ function initOutletPage(ctx) {
       listEl.innerHTML = '<div class="empty-state">Could not load requests. Please refresh.</div>';
       return;
     }
+    window.__activeRequests = res.data;
     if (!res.data.length) {
       listEl.innerHTML = '<div class="empty-state">No active requests. Create one above.</div>';
+      renderTrackMap([]);
       return;
     }
+
+    // Fetch trackable vehicles (RLS returns only our active-delivery vans).
+    var vehiclesById = await loadTrackedVehicles();
+
     listEl.innerHTML = res.data.map(function (r) {
-      // Outlet users see THAT a driver/vehicle is assigned, not who —
-      // driver details and locations stay private from outlets.
+      // Outlet users see THAT a driver is assigned (not who), and — for
+      // their own active delivery — the assigned van and its freshness.
       var chips = '';
       if (r.driver_id) chips += '<span class="chip">👤 Driver assigned</span>';
-      if (r.vehicle_id) chips += '<span class="chip">🚐 Vehicle assigned</span>';
+      var v = r.vehicle_id && vehiclesById[r.vehicle_id];
+      if (v) {
+        var fresh = locationFreshness(v.last_updated);
+        chips += '<span class="chip">🚐 ' + escapeHtml(v.vehicle_name) + ' · ' + escapeHtml(v.plate_number) + '</span>';
+        chips += '<span class="chip fresh-' + fresh.cls + '">' + escapeHtml(fresh.label) + '</span>';
+        if (v.last_updated) {
+          chips += '<div class="meta">📍 Location updated ' + escapeHtml(fmtTime(v.last_updated)) + '</div>';
+        }
+      } else if (r.vehicle_id) {
+        chips += '<span class="chip">🚐 Vehicle assigned</span>';
+      }
       return requestCardHtml(r, { extraHtml: chips });
     }).join('');
+
+    var trackable = Object.keys(vehiclesById).map(function (k) { return vehiclesById[k]; });
+    renderTrackMap(trackable);
   }
 
   form.addEventListener('submit', async function (e) {

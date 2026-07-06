@@ -7,7 +7,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <title>Fleet Board Pro — Driver</title>
+  <title>Fleet Board Pro — My Profile</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body class="loading">
@@ -18,36 +18,18 @@
         <span id="userName" class="user-name"></span>
         <span id="roleBadge" class="badge"></span>
       </div>
-      <a class="btn btn-outline btn-small" href="profile.html">Profile</a>
       <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
     </header>
 
-    <main class="content driver-main">
-      <h2>My Jobs</h2>
+    <main class="content">
+      <div class="section-head">
+        <h2>My Profile</h2>
+        <a id="backBtn" class="btn btn-outline btn-small" href="index.html">Back</a>
+      </div>
       <p class="muted page-sub"><span id="companyName"></span></p>
 
-      <div id="flash"></div>
-
-      <section>
-        <div class="section-head">
-          <h3>🚚 Current Job</h3>
-          <button id="refreshJobs" class="btn btn-outline btn-small" type="button">Refresh</button>
-        </div>
-        <div id="jobList" class="request-list"></div>
-      </section>
-
-      <section class="panel" style="margin-top: 1.75rem;">
-        <h3>📍 Location Sharing</h3>
-        <p class="muted" id="locStatus">Location sharing is off.</p>
-        <p class="muted small" id="locLast"></p>
-        <button id="locToggle" class="btn btn-primary btn-block" type="button">Share Location</button>
-      </section>
-
-      <section style="margin-top: 1.75rem;">
-        <div class="section-head">
-          <h3>🗂️ Recent Jobs</h3>
-        </div>
-        <div id="recentList" class="request-list"></div>
+      <section class="panel">
+        <div id="profileCard" class="profile-card"></div>
       </section>
     </main>
   </div>
@@ -59,9 +41,9 @@
   <script src="js/supabase-client.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/ui.js"></script>
-  <script src="js/driver.js"></script>
+  <script src="js/profile.js"></script>
   <script>
-    initDashboard('driver').then(function (ctx) { if (ctx) initDriverPage(ctx); });
+    initAnyRolePage().then(function (ctx) { if (ctx) initProfilePage(ctx); });
   </script>
   <script src="js/pwa.js"></script>
 </body>
