@@ -38,7 +38,7 @@ async function checkAccess() {
 
   var res = await window.sb
     .from('profiles')
-    .select('user_id, company_id, role, name, email, phone, active')
+    .select('user_id, company_id, role, name, email, phone, active, outlet_id, driver_id, vehicle_id, created_at')
     .eq('user_id', session.user.id)
     .maybeSingle();
 
