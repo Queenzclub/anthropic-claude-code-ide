@@ -20,7 +20,6 @@
         <span id="roleBadge" class="badge"></span>
       </div>
       <a class="btn btn-outline btn-small" href="profile.html">Profile</a>
-      <button id="logoutBtn" class="btn btn-outline" type="button">Log Out</button>
     </header>
 
     <main class="content">
@@ -29,38 +28,49 @@
 
       <div id="flash"></div>
 
-      <section class="panel">
-        <h3>➕ Request Vehicle</h3>
-        <form id="requestForm" class="form-grid" novalidate>
-          <div class="field">
-            <label for="pickup">Pickup location *</label>
-            <input id="pickup" required placeholder="Where should the driver collect?">
-          </div>
-          <div class="field">
-            <label for="dropoff">Drop-off location *</label>
-            <input id="dropoff" required placeholder="Where should it go?">
-          </div>
-          <div class="field">
-            <label for="customerName">Customer name</label>
-            <input id="customerName" placeholder="Customer or receiver name">
-          </div>
-          <div class="field">
-            <label for="customerContact">Customer contact</label>
-            <input id="customerContact" placeholder="Phone number">
-          </div>
-          <div class="field full">
-            <label for="notes">Delivery notes</label>
-            <textarea id="notes" placeholder="Items, quantity, special instructions…"></textarea>
-          </div>
-          <div class="full">
-            <button id="submitRequestBtn" class="btn btn-primary btn-block" type="submit">Request Vehicle</button>
-          </div>
-        </form>
+      <section>
+        <div id="summaryStats" class="stats"></div>
       </section>
 
-      <section>
+      <section style="margin-top: 1.25rem;">
+        <button id="toggleRequestBtn" class="btn btn-primary btn-block" type="button">➕ Request Vehicle</button>
+        <div id="requestFormHost" class="panel hidden" style="margin-top: 0.9rem;">
+          <h3>Request Vehicle</h3>
+          <form id="requestForm" class="form-grid" novalidate>
+            <div class="field">
+              <label for="pickup">Pickup location *</label>
+              <input id="pickup" required placeholder="Where should the driver collect?">
+            </div>
+            <div class="field">
+              <label for="dropoff">Drop-off location *</label>
+              <input id="dropoff" required placeholder="Where should it go?">
+            </div>
+            <div class="field">
+              <label for="customerName">Customer name</label>
+              <input id="customerName" placeholder="Customer or receiver name">
+            </div>
+            <div class="field">
+              <label for="customerContact">Customer contact</label>
+              <input id="customerContact" placeholder="Phone number">
+            </div>
+            <div class="field full">
+              <label for="notes">Delivery notes</label>
+              <textarea id="notes" placeholder="Items, quantity, special instructions…"></textarea>
+            </div>
+            <div class="full request-actions">
+              <button id="submitRequestBtn" class="btn btn-primary" type="submit">Send Request</button>
+              <button id="cancelRequestBtn" class="btn btn-outline" type="button">Cancel</button>
+            </div>
+          </form>
+          <p class="muted small" style="margin: 0.5rem 0 0;">
+            Your request is sent to all on-duty drivers. The first available driver accepts it.
+          </p>
+        </div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
         <div class="section-head">
-          <h3>📦 My Active Requests</h3>
+          <h3>📦 Active Deliveries</h3>
           <button id="refreshRequests" class="btn btn-outline btn-small" type="button">Refresh</button>
         </div>
         <div id="requestList" class="request-list"></div>

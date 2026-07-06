@@ -327,4 +327,51 @@ select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003
 select exists(select 1 from public.vehicles where id = '50000000-0000-0000-0000-000000000001') as still_sees_after_complete;
 reset role;
 
+-- ============ Dispatch + driver self-accept ============
+reset role;
+select set_config('request.jwt.claim.sub', '', false) \g /dev/null
+-- Open request from outlet 1 (any active company driver may accept).
+insert into public.vehicle_requests
+  (id, company_id, outlet_id, status, dispatch_mode, pickup_location, dropoff_location, requested_by)
+values
+  ('70000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001',
+   '30000000-0000-0000-0000-000000000001', 'pending', 'open', 'Shop', 'Customer',
+   'a0000000-0000-0000-0000-000000000003');
+-- Specific request targeted at driver 2 only.
+insert into public.vehicle_requests
+  (id, company_id, outlet_id, status, dispatch_mode, target_driver_id, pickup_location, dropoff_location, requested_by)
+values
+  ('70000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001',
+   '30000000-0000-0000-0000-000000000001', 'pending', 'specific',
+   '40000000-0000-0000-0000-000000000002', 'Shop', 'Customer',
+   'a0000000-0000-0000-0000-000000000003');
+
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+\echo 'TEST 27: driver sees the OPEN request (expect 1) but NOT the one targeted at another driver (expect 0)'
+select
+  (select count(*) from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000001') as sees_open,
+  (select count(*) from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000002') as sees_other_target;
+
+\echo 'TEST 28: driver accepts the open request -> becomes theirs, accepted (expect driver_id set | accepted)'
+update public.vehicle_requests
+  set status = 'accepted',
+      driver_id = app.my_driver_id(),
+      vehicle_id = app.my_vehicle_id()
+  where id = '70000000-0000-0000-0000-000000000001' and status = 'pending'
+  returning (driver_id = '40000000-0000-0000-0000-000000000001') as claimed_by_me, status;
+
+\echo 'TEST 29: driver cannot claim a request targeted at another driver (expect PASS)'
+do $$ begin
+  update public.vehicle_requests
+    set status = 'accepted', driver_id = app.my_driver_id()
+    where id = '70000000-0000-0000-0000-000000000002';
+  if not found then
+    raise notice 'PASS: targeted request not visible/claimable by this driver';
+  else
+    raise exception 'FAIL: claimed a request targeted at another driver';
+  end if;
+end $$;
+reset role;
+
 \echo '=== ALL SMOKE TESTS DONE ==='

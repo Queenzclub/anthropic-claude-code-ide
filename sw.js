@@ -12,7 +12,7 @@
 //
 // Bump CACHE_VERSION when deploying changes so old caches are cleared.
 
-var CACHE_VERSION = 'fleetboard-v3';
+var CACHE_VERSION = 'fleetboard-v4';
 
 var ASSETS = [
   './',
