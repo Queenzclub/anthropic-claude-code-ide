@@ -84,11 +84,8 @@ async function guardPage(expectedRole) {
   return result;
 }
 
-// Fills the shared dashboard header and reveals the page.
-async function initDashboard(expectedRole) {
-  var ctx = await guardPage(expectedRole);
-  if (!ctx) return null;
-
+// Fills the shared header (name, role, company), wires logout, reveals page.
+async function applyChrome(ctx) {
   var profile = ctx.profile;
   var nameEl = document.getElementById('userName');
   var emailEl = document.getElementById('userEmail');
@@ -119,4 +116,27 @@ async function initDashboard(expectedRole) {
   document.body.classList.remove('loading');
   document.body.classList.add('ready');
   return ctx;
+}
+
+// Guard + chrome for a role-specific dashboard page.
+async function initDashboard(expectedRole) {
+  var ctx = await guardPage(expectedRole);
+  if (!ctx) return null;
+  return applyChrome(ctx);
+}
+
+// Guard + chrome for a page any active user may see (e.g. My Profile).
+// Redirects to login when not logged in / not usable, but does not
+// bounce between roles.
+async function initAnyRolePage() {
+  if (!window.sb) {
+    window.location.replace('index.html');
+    return null;
+  }
+  var result = await checkAccess();
+  if (!result.ok) {
+    await sendToLogin(result.reason);
+    return null;
+  }
+  return applyChrome(result);
 }

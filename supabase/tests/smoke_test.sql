@@ -292,4 +292,39 @@ update public.vehicles set status = 'maintenance'
 where id = '50000000-0000-0000-0000-000000000001'
 returning id;
 reset role;
+
+-- ============ Outlet tracks only its own active delivery ============
+-- State here: vehicle 1 (50..001) has an accepted job for outlet 1
+-- (the "Docks" job). Vehicle 2 (50..002) is idle. Add an active job
+-- for the SECOND outlet on a fresh van, which outlet 1 must NOT see.
+insert into public.drivers (id, company_id, name) values
+  ('40000000-0000-0000-0000-0000000000d2', '10000000-0000-0000-0000-000000000001', 'Outlet2 Driver');
+insert into public.vehicles (id, company_id, vehicle_name, plate_number) values
+  ('50000000-0000-0000-0000-0000000000d2', '10000000-0000-0000-0000-000000000001', 'Outlet2 Van', 'O2-1');
+insert into public.vehicle_requests
+  (company_id, outlet_id, driver_id, vehicle_id, status, pickup_location, dropoff_location, requested_by)
+values
+  ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000002',
+   '40000000-0000-0000-0000-0000000000d2', '50000000-0000-0000-0000-0000000000d2',
+   'accepted', 'Second Shop', 'Town', 'a0000000-0000-0000-0000-000000000002');
+
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', false) \g /dev/null
+\echo 'TEST 25: outlet sees its own active-delivery van (t), not an idle van (f), not another outlet''s van (f)'
+select
+  exists(select 1 from public.vehicles where id = '50000000-0000-0000-0000-000000000001') as sees_own_delivery,
+  exists(select 1 from public.vehicles where id = '50000000-0000-0000-0000-000000000002') as sees_idle_van,
+  exists(select 1 from public.vehicles where id = '50000000-0000-0000-0000-0000000000d2') as sees_other_outlet_van;
+reset role;
+
+\echo 'TEST 26: outlet loses tracking once its delivery closes (expect f)'
+-- Clear the lingering JWT claim so this closes the job as a service step.
+select set_config('request.jwt.claim.sub', '', false) \g /dev/null
+update public.vehicle_requests set status = 'completed'
+where vehicle_id = '50000000-0000-0000-0000-000000000001' and status = 'accepted';
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', false) \g /dev/null
+select exists(select 1 from public.vehicles where id = '50000000-0000-0000-0000-000000000001') as still_sees_after_complete;
+reset role;
+
 \echo '=== ALL SMOKE TESTS DONE ==='
