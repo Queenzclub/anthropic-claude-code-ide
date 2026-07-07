@@ -117,9 +117,26 @@ function showToast(message) {
     setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 300);
   }, 6000);
 
-  if (window.Notification && Notification.permission === 'granted') {
-    try { new Notification('Fleet Board Pro', { body: message }); } catch (e) { /* ignore */ }
+  showOsNotification(message);
+}
+
+// Fires an OS-level notification when the user has granted permission.
+// On phones the Notification constructor is not allowed, so we go through
+// the service worker's showNotification (which also works when the tab is
+// backgrounded). Falls back to the constructor on desktop. This does NOT
+// deliver anything when the app is fully closed — that needs Web Push.
+function showOsNotification(message) {
+  if (!window.Notification || Notification.permission !== 'granted') return;
+  var opts = { body: message, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', tag: 'fleetboard' };
+  if (navigator.serviceWorker && navigator.serviceWorker.ready) {
+    navigator.serviceWorker.ready
+      .then(function (reg) { return reg.showNotification('Fleet Board Pro', opts); })
+      .catch(function () {
+        try { new Notification('Fleet Board Pro', opts); } catch (e) { /* ignore */ }
+      });
+    return;
   }
+  try { new Notification('Fleet Board Pro', opts); } catch (e) { /* ignore */ }
 }
 
 // Asks for browser-notification permission. cb receives the resulting

@@ -104,12 +104,14 @@ function initOutletPage(ctx) {
   // Count of this outlet's deliveries completed since midnight (its own
   // query so it can run in parallel with the vehicle-tracking fetch).
   async function countCompletedToday() {
+    // Count by completed_at (the moment the job finished) against local
+    // midnight, so "today" matches the user's own day (e.g. Maldives).
     var doneRes = await window.sb
       .from('vehicle_requests')
       .select('id')
       .eq('outlet_id', profile.outlet_id)
       .eq('status', 'completed')
-      .gte('updated_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
+      .gte('completed_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
     return (!doneRes.error && doneRes.data) ? doneRes.data.length : 0;
   }
 
@@ -151,7 +153,8 @@ function initOutletPage(ctx) {
     if (!res.data.length) {
       listEl.innerHTML = '<div class="empty-state">No active deliveries. Tap Request Vehicle to start one.</div>';
       renderTrackMap([]);
-      updateSummary([], {}, 0);
+      // Still show today's completed count even with nothing active.
+      updateSummary([], {}, await countCompletedToday());
       return;
     }
 

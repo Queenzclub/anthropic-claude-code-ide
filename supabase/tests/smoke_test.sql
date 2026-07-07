@@ -353,13 +353,15 @@ select
   (select count(*) from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000001') as sees_open,
   (select count(*) from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000002') as sees_other_target;
 
-\echo 'TEST 28: driver accepts the open request -> becomes theirs, accepted (expect driver_id set | accepted)'
+\echo 'TEST 28: driver accepts the open request WITHOUT sending a vehicle -> claimed, accepted, and the trigger auto-assigns their van (expect t | accepted | t)'
 update public.vehicle_requests
   set status = 'accepted',
-      driver_id = app.my_driver_id(),
-      vehicle_id = app.my_vehicle_id()
+      driver_id = app.my_driver_id()
   where id = '70000000-0000-0000-0000-000000000001' and status = 'pending'
-  returning (driver_id = '40000000-0000-0000-0000-000000000001') as claimed_by_me, status;
+  returning
+    (driver_id = '40000000-0000-0000-0000-000000000001') as claimed_by_me,
+    status,
+    (vehicle_id = '50000000-0000-0000-0000-000000000001') as van_auto_assigned;
 
 \echo 'TEST 29: driver cannot claim a request targeted at another driver (expect PASS)'
 do $$ begin
@@ -372,6 +374,14 @@ do $$ begin
     raise exception 'FAIL: claimed a request targeted at another driver';
   end if;
 end $$;
+reset role;
+
+\echo 'TEST 30: outlet can track the van for a DRIVER-accepted open request (no manager assignment) (expect t)'
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', false) \g /dev/null
+select exists(
+  select 1 from public.vehicles where id = '50000000-0000-0000-0000-000000000001'
+) as outlet_can_track_van;
 reset role;
 
 \echo '=== ALL SMOKE TESTS DONE ==='

@@ -11,19 +11,11 @@ function initDriverPage(ctx) {
   var jobsEl = document.getElementById('jobList');
   var availableEl = document.getElementById('availableList');
   var activeJobs = [];
-  var myVehicleId = null;
 
   if (!profile.driver_id) {
     jobsEl.innerHTML = '<div class="empty-state">Your account is not linked to a driver record yet. Please contact your admin.</div>';
     if (availableEl) availableEl.innerHTML = '';
     return;
-  }
-
-  // The driver's own vehicle (RLS: a driver may read their own vehicle).
-  async function loadMyVehicle() {
-    var res = await window.sb.from('vehicles')
-      .select('id').eq('driver_id', profile.driver_id).eq('active', true).limit(1);
-    myVehicleId = (!res.error && res.data && res.data.length) ? res.data[0].id : null;
   }
 
   // ---------- Available requests (dispatch inbox) ----------
@@ -67,9 +59,12 @@ function initDriverPage(ctx) {
 
   async function acceptJob(id, btn) {
     btn.disabled = true;
+    // Only claim the job for this driver. The database assigns the
+    // driver's vehicle automatically (so the outlet can track it) — the
+    // client no longer needs to know or send the vehicle id.
     var res = await window.sb
       .from('vehicle_requests')
-      .update({ status: 'accepted', driver_id: profile.driver_id, vehicle_id: myVehicleId })
+      .update({ status: 'accepted', driver_id: profile.driver_id })
       .eq('id', id)
       .eq('status', 'pending')
       .select('id');
@@ -331,11 +326,9 @@ function initDriverPage(ctx) {
     loadJobs();
     loadRecent();
   });
-  loadMyVehicle().then(function () {
-    loadAvailable();
-    loadJobs();
-    loadRecent();
-  });
+  loadAvailable();
+  loadJobs();
+  loadRecent();
 
   // Live notifications: toast + badge when a new request this driver can
   // take is created. Refreshes the inbox so Accept is immediately usable.
