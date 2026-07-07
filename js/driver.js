@@ -29,6 +29,13 @@ function initDriverPage(ctx) {
   // ---------- Available requests (dispatch inbox) ----------
   // RLS returns only pending requests dispatched to this driver: open
   // company requests, or ones specifically targeted at them.
+  var availBadge = document.getElementById('availBadge');
+  function setAvailBadge(n) {
+    if (!availBadge) return;
+    if (n > 0) { availBadge.textContent = n; availBadge.classList.remove('hidden'); }
+    else availBadge.classList.add('hidden');
+  }
+
   async function loadAvailable() {
     var res = await window.sb
       .from('vehicle_requests')
@@ -38,8 +45,10 @@ function initDriverPage(ctx) {
 
     if (res.error) {
       availableEl.innerHTML = '<div class="empty-state">Could not load requests. Please refresh.</div>';
+      setAvailBadge(0);
       return;
     }
+    setAvailBadge(res.data.length);
     if (!res.data.length) {
       availableEl.innerHTML = '<div class="empty-state">No available requests right now.</div>';
       return;
@@ -327,4 +336,11 @@ function initDriverPage(ctx) {
     loadJobs();
     loadRecent();
   });
+
+  // Live notifications: toast + badge when a new request this driver can
+  // take is created. Refreshes the inbox so Accept is immediately usable.
+  if (typeof initDriverNotifications === 'function') {
+    initDriverNotifications(profile, loadAvailable);
+    initAlertsButton('enableAlerts');
+  }
 }

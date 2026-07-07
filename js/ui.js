@@ -96,3 +96,41 @@ function showFlash(message, type) {
   showFlash._timer = setTimeout(function () { host.innerHTML = ''; }, 5000);
   host.scrollIntoView({ block: 'nearest' });
 }
+
+// A stacked, auto-dismissing toast for live notifications. If the user
+// has granted browser-notification permission, also fires a native
+// notification (useful when the tab is in the background).
+function showToast(message) {
+  var host = document.getElementById('toastHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'toastHost';
+    host.className = 'toast-host';
+    document.body.appendChild(host);
+  }
+  var el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = message;
+  host.appendChild(el);
+  setTimeout(function () {
+    el.classList.add('toast-out');
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 300);
+  }, 6000);
+
+  if (window.Notification && Notification.permission === 'granted') {
+    try { new Notification('Fleet Board Pro', { body: message }); } catch (e) { /* ignore */ }
+  }
+}
+
+// Asks for browser-notification permission. cb receives the resulting
+// state: 'granted' | 'denied' | 'default' | 'unsupported'.
+function requestNotifyPermission(cb) {
+  cb = cb || function () {};
+  if (!window.Notification) return cb('unsupported');
+  if (Notification.permission === 'granted') return cb('granted');
+  if (Notification.permission === 'denied') return cb('denied');
+  try {
+    var p = Notification.requestPermission(function (state) { cb(state); });
+    if (p && typeof p.then === 'function') p.then(cb);
+  } catch (e) { cb('default'); }
+}
