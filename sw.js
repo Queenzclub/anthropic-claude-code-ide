@@ -12,7 +12,7 @@
 //
 // Bump CACHE_VERSION when deploying changes so old caches are cleared.
 
-var CACHE_VERSION = 'fleetboard-v6';
+var CACHE_VERSION = 'fleetboard-v7';
 
 var ASSETS = [
   './',
@@ -98,5 +98,21 @@ self.addEventListener('fetch', function (event) {
           return Response.error();
         });
       })
+  );
+});
+
+// Tapping an OS notification focuses an open app window (or opens one).
+// Note: notifications are only shown while the app is running; delivering
+// them when the app is fully closed would require Web Push (a push
+// subscription + a server/Edge Function), which is not set up here.
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (clients) {
+      for (var i = 0; i < clients.length; i++) {
+        if ('focus' in clients[i]) return clients[i].focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow('./');
+    })
   );
 });

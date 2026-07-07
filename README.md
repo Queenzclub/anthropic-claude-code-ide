@@ -90,6 +90,26 @@ static files cached for fast loading. Live data always comes from
 Supabase — nothing sensitive is cached, and actions that fail offline
 show a clear error instead of pretending they worked.
 
+## Notifications
+
+Live alerts use Supabase Realtime and work **while the app is open**
+(foreground or a backgrounded tab/PWA):
+
+- **Drivers** get *"New delivery request available"* when a request they
+  can take is created.
+- **Outlets** get *"Your delivery has been completed"* for their own
+  deliveries.
+
+These always show as an in-app toast. If the user taps **🔔 Enable
+alerts** and grants permission, they also appear as an OS/phone
+notification (via the service worker) while the app is running.
+
+**Full closed-app push is not implemented.** Delivering a notification
+when the app is completely closed requires Web Push — a push
+subscription plus a server or Supabase Edge Function that sends the
+push. That is a deliberate later step; today, alerts require the app to
+be open in the background.
+
 ## Creating users
 
 Login accounts are created in the **Supabase Dashboard**
