@@ -12,7 +12,7 @@
 //
 // Bump CACHE_VERSION when deploying changes so old caches are cleared.
 
-var CACHE_VERSION = 'fleetboard-v5';
+var CACHE_VERSION = 'fleetboard-v6';
 
 var ASSETS = [
   './',
@@ -33,6 +33,7 @@ var ASSETS = [
   'js/outlet.js',
   'js/driver.js',
   'js/profile.js',
+  'js/notify.js',
   'js/pwa.js',
   'vendor/supabase.js',
   'vendor/leaflet/leaflet.js',

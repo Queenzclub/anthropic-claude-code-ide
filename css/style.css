@@ -339,6 +339,51 @@ code {
 .fresh-live    { color: #8fe6b8; border-color: rgba(47, 191, 113, 0.5); }
 .fresh-old     { color: #ffd08a; border-color: rgba(240, 160, 32, 0.5); }
 .fresh-offline { color: #ffb3b5; border-color: rgba(229, 72, 77, 0.45); }
+.fresh-none    { color: #b7c3dd; border-color: rgba(146, 161, 192, 0.45); }
+
+/* Small actions cluster inside a section header. */
+.section-head-actions { display: flex; align-items: center; gap: 0.5rem; }
+
+/* Count badge next to a heading (e.g. number of available requests). */
+.count-badge {
+  display: inline-block;
+  min-width: 1.4rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-align: center;
+  vertical-align: middle;
+}
+
+/* Live notification toasts, stacked at the top of the screen. */
+.toast-host {
+  position: fixed;
+  top: 0.75rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(92%, 460px);
+  pointer-events: none;
+}
+.toast {
+  background: #1b2233;
+  color: #eaf0ff;
+  border: 1px solid rgba(120, 150, 220, 0.4);
+  border-left: 4px solid var(--green, #2fbf71);
+  border-radius: 10px;
+  padding: 0.7rem 0.9rem;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 0.95rem;
+  opacity: 1;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.toast-out { opacity: 0; transform: translateY(-6px); }
 
 #vehicleMap, #trackMap {
   height: 320px;

@@ -71,7 +71,10 @@
       <section style="margin-top: 1.75rem;">
         <div class="section-head">
           <h3>📦 Active Deliveries</h3>
-          <button id="refreshRequests" class="btn btn-outline btn-small" type="button">Refresh</button>
+          <div class="section-head-actions">
+            <button id="enableAlerts" class="btn btn-outline btn-small hidden" type="button">🔔 Enable alerts</button>
+            <button id="refreshRequests" class="btn btn-outline btn-small" type="button">Refresh</button>
+          </div>
         </div>
         <div id="requestList" class="request-list"></div>
       </section>
@@ -101,6 +104,7 @@
   <script src="js/supabase-client.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/ui.js"></script>
+  <script src="js/notify.js"></script>
   <script src="js/outlet.js"></script>
   <script>
     initDashboard('outlet').then(function (ctx) { if (ctx) initOutletPage(ctx); });

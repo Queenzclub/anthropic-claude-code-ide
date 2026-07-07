@@ -24,6 +24,18 @@ function initOutletPage(ctx) {
   var map = null;
   var markersLayer = null;
 
+  // Outlet-facing tracking state for a vehicle on our own delivery.
+  // "Waiting for driver location" until the driver shares a point,
+  // then "Live" (<= 5 min) or "Old location" after that.
+  function outletTrackState(v) {
+    if (!v || v.last_lat == null || v.last_lng == null || !v.last_updated) {
+      return { located: false, label: 'Waiting for driver location', cls: 'none' };
+    }
+    var mins = (Date.now() - new Date(v.last_updated).getTime()) / 60000;
+    if (mins <= 5) return { located: true, label: 'Live', cls: 'live' };
+    return { located: true, label: 'Old location', cls: 'old' };
+  }
+
   async function loadTrackedVehicles() {
     var ids = [];
     (window.__activeRequests || []).forEach(function (r) {
@@ -54,7 +66,7 @@ function initOutletPage(ctx) {
     }
     if (!located.length) {
       if (mapEl) mapEl.classList.add('hidden');
-      emptyEl.textContent = 'Your delivery is assigned, but the driver has not shared a location yet.';
+      emptyEl.textContent = 'Waiting for driver location. The map appears once the driver turns on location sharing.';
       emptyEl.classList.remove('hidden');
       return;
     }
@@ -78,7 +90,7 @@ function initOutletPage(ctx) {
     markersLayer.clearLayers();
     var bounds = [];
     located.forEach(function (v) {
-      var fresh = locationFreshness(v.last_updated);
+      var fresh = outletTrackState(v);
       var popup = '<strong>' + escapeHtml(v.vehicle_name) + '</strong> · ' + escapeHtml(v.plate_number) +
         '<br>Updated: ' + escapeHtml(fmtTime(v.last_updated)) + ' (' + escapeHtml(fresh.label) + ')';
       markersLayer.addLayer(L.marker([v.last_lat, v.last_lng]).bindPopup(popup));
@@ -89,21 +101,26 @@ function initOutletPage(ctx) {
     else map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
   }
 
-  // Today summary cards.
-  async function updateSummary(active, vehiclesById) {
-    var pending = active.filter(function (r) { return r.status === 'pending'; }).length;
-    var moving = active.filter(function (r) { return r.status === 'accepted' || r.status === 'in_progress'; }).length;
-    var onTheWay = active.filter(function (r) {
-      return r.vehicle_id && vehiclesById[r.vehicle_id];
-    }).length;
-
+  // Count of this outlet's deliveries completed since midnight (its own
+  // query so it can run in parallel with the vehicle-tracking fetch).
+  async function countCompletedToday() {
     var doneRes = await window.sb
       .from('vehicle_requests')
       .select('id')
       .eq('outlet_id', profile.outlet_id)
       .eq('status', 'completed')
       .gte('updated_at', new Date(new Date().setHours(0, 0, 0, 0)).toISOString());
-    var completedToday = (!doneRes.error && doneRes.data) ? doneRes.data.length : 0;
+    return (!doneRes.error && doneRes.data) ? doneRes.data.length : 0;
+  }
+
+  // Today summary cards. completedToday is fetched by the caller so this
+  // stays synchronous and does not add another serial round-trip.
+  function updateSummary(active, vehiclesById, completedToday) {
+    var pending = active.filter(function (r) { return r.status === 'pending'; }).length;
+    var moving = active.filter(function (r) { return r.status === 'accepted' || r.status === 'in_progress'; }).length;
+    var onTheWay = active.filter(function (r) {
+      return r.vehicle_id && vehiclesById[r.vehicle_id];
+    }).length;
 
     var host = document.getElementById('summaryStats');
     var tiles = [
@@ -134,12 +151,15 @@ function initOutletPage(ctx) {
     if (!res.data.length) {
       listEl.innerHTML = '<div class="empty-state">No active deliveries. Tap Request Vehicle to start one.</div>';
       renderTrackMap([]);
-      updateSummary([], {});
+      updateSummary([], {}, 0);
       return;
     }
 
-    // Fetch trackable vehicles (RLS returns only our active-delivery vans).
-    var vehiclesById = await loadTrackedVehicles();
+    // Trackable vehicles (RLS returns only our active-delivery vans) and
+    // today's completed count run in parallel — no serial round-trips.
+    var results = await Promise.all([loadTrackedVehicles(), countCompletedToday()]);
+    var vehiclesById = results[0];
+    var completedToday = results[1];
 
     listEl.innerHTML = res.data.map(function (r) {
       // Outlet users see THAT a driver is assigned (not who), and — for
@@ -148,21 +168,23 @@ function initOutletPage(ctx) {
       if (r.driver_id) chips += '<span class="chip">👤 Driver assigned</span>';
       var v = r.vehicle_id && vehiclesById[r.vehicle_id];
       if (v) {
-        var fresh = locationFreshness(v.last_updated);
+        var fresh = outletTrackState(v);
         chips += '<span class="chip">🚐 ' + escapeHtml(v.vehicle_name) + ' · ' + escapeHtml(v.plate_number) + '</span>';
         chips += '<span class="chip fresh-' + fresh.cls + '">' + escapeHtml(fresh.label) + '</span>';
-        if (v.last_updated) {
-          chips += '<div class="meta">📍 Location updated ' + escapeHtml(fmtTime(v.last_updated)) + '</div>';
-        }
+        chips += '<div class="meta">📍 ' + (fresh.located
+          ? 'Location updated ' + escapeHtml(fmtTime(v.last_updated))
+          : 'Waiting for driver location') + '</div>';
       } else if (r.vehicle_id) {
         chips += '<span class="chip">🚐 Vehicle assigned</span>';
+      } else if (r.status === 'accepted' || r.status === 'in_progress') {
+        chips += '<span class="chip">⏳ Waiting for a vehicle to be assigned</span>';
       }
       return requestCardHtml(r, { extraHtml: chips });
     }).join('');
 
     var trackable = Object.keys(vehiclesById).map(function (k) { return vehiclesById[k]; });
     renderTrackMap(trackable);
-    updateSummary(res.data, vehiclesById);
+    updateSummary(res.data, vehiclesById, completedToday);
   }
 
   form.addEventListener('submit', async function (e) {
@@ -258,4 +280,13 @@ function initOutletPage(ctx) {
   });
   loadRequests();
   loadHistory();
+
+  // Live notification when one of this outlet's own deliveries completes.
+  if (typeof initOutletNotifications === 'function') {
+    initOutletNotifications(profile, function () {
+      loadHistory();
+      loadRequests();
+    });
+    initAlertsButton('enableAlerts');
+  }
 }
