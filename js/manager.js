@@ -175,9 +175,8 @@ function initManagerPage(ctx) {
 
   var statsEl = document.getElementById('vehicleStats');
   var vehiclesEl = document.getElementById('vehicleList');
-  var map = null;
-  var markersLayer = null;
-  var mapFitted = false;
+  var liveMap = createLiveVehicleMap('vehicleMap');
+  var vehicleCache = {};  // id -> latest row (for driver names on live moves)
 
   function vehicleCardHtml(v) {
     var fresh = locationFreshness(v.last_updated);
@@ -191,6 +190,10 @@ function initManagerPage(ctx) {
     '</div>';
   }
 
+  function vehiclePopup(v) {
+    return vehiclePopupHtml(v, { driverName: v.drivers && v.drivers.name });
+  }
+
   function renderMap(vehicles) {
     var mapEl = document.getElementById('vehicleMap');
     var emptyEl = document.getElementById('mapEmpty');
@@ -200,42 +203,31 @@ function initManagerPage(ctx) {
       emptyEl.classList.remove('hidden');
       return;
     }
-    if (!map) {
-      map = L.map('vehicleMap');
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors',
-        maxZoom: 19,
-      }).addTo(map);
-      markersLayer = L.layerGroup().addTo(map);
-      map.setView([3.139, 101.6869], 11);
-    }
-    markersLayer.clearLayers();
 
     var located = vehicles.filter(function (v) {
       return v.last_lat != null && v.last_lng != null;
     });
-    if (!located.length) {
+    // Incremental: markers move in place; zoom/pan kept after first fit.
+    var shown = liveMap.sync(located, vehiclePopup);
+    if (!shown) {
       emptyEl.textContent = 'No vehicle locations yet.';
       emptyEl.classList.remove('hidden');
       return;
     }
     emptyEl.classList.add('hidden');
+  }
 
-    var bounds = [];
-    located.forEach(function (v) {
-      var fresh = locationFreshness(v.last_updated);
-      var popup = '<strong>' + escapeHtml(v.vehicle_name) + '</strong> · ' +
-        escapeHtml(v.plate_number) + '<br>' +
-        'Status: ' + escapeHtml(STATUS_LABELS[v.status] || v.status) + '<br>' +
-        (v.drivers ? 'Driver: ' + escapeHtml(v.drivers.name) + '<br>' : '') +
-        'Updated: ' + escapeHtml(fmtTime(v.last_updated)) + ' (' + escapeHtml(fresh.label) + ')';
-      markersLayer.addLayer(L.marker([v.last_lat, v.last_lng]).bindPopup(popup));
-      bounds.push([v.last_lat, v.last_lng]);
-    });
-    if (!mapFitted) {
-      map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
-      mapFitted = true;
-    }
+  // Live position event for a company vehicle: move its marker in place.
+  // The realtime row has no joined driver name, so it is merged from the
+  // last full load. RLS scopes events to this company only.
+  function onVehicleMove(v) {
+    if (!window.L) return;
+    var known = vehicleCache[v.id];
+    if (known && known.drivers) v.drivers = known.drivers;
+    vehicleCache[v.id] = v;
+    if (v.last_lat == null || v.last_lng == null) return;
+    document.getElementById('mapEmpty').classList.add('hidden');
+    liveMap.move(v, vehiclePopup(v));
   }
 
   async function loadVehicles() {
@@ -249,6 +241,8 @@ function initManagerPage(ctx) {
       vehiclesEl.innerHTML = '<div class="empty-state">Could not load vehicles. Please refresh.</div>';
       return;
     }
+    vehicleCache = {};
+    res.data.forEach(function (v) { vehicleCache[v.id] = v; });
 
     var counts = { available: 0, busy: 0, offline: 0, maintenance: 0 };
     res.data.forEach(function (v) {
@@ -438,7 +432,11 @@ function initManagerPage(ctx) {
     loadHistory();
   });
 
-  // Light polling keeps the overview fresh without realtime complexity.
+  // Live marker moves via realtime; 60s polling stays as the fallback
+  // and keeps the status cards/counters fresh.
+  if (typeof initVehicleLiveUpdates === 'function') {
+    initVehicleLiveUpdates(ctx.profile, onVehicleMove);
+  }
   setInterval(loadVehicles, 60000);
   loadAll();
 }

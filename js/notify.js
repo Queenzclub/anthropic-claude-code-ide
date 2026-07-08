@@ -49,12 +49,15 @@ function initDriverNotifications(profile, onNew) {
   );
 }
 
-// Outlets: toast when one of their own deliveries is completed.
-// onCompleted() (optional) refreshes the history / active lists.
-function initOutletNotifications(profile, onCompleted) {
+// Outlets: toast when one of their own deliveries is completed, and
+// notify on ANY change to their own requests (driver accepted, trip
+// started, cancelled...) so the list and tracking map stay in sync
+// without a refresh. onCompleted() fires on completion (with the toast);
+// onChange() fires on every other update.
+function initOutletNotifications(profile, onCompleted, onChange) {
   if (!profile || !profile.outlet_id) return null;
   return fleetSubscribe(
-    'outlet-completions-' + profile.outlet_id,
+    'outlet-requests-' + profile.outlet_id,
     {
       event: 'UPDATE',
       schema: 'public',
@@ -63,9 +66,34 @@ function initOutletNotifications(profile, onCompleted) {
     },
     function (payload) {
       var r = (payload && payload.new) || {};
-      if (r.status !== 'completed') return;
-      showToast('Your delivery has been completed');
-      if (typeof onCompleted === 'function') onCompleted();
+      if (r.status === 'completed') {
+        showToast('Your delivery has been completed');
+        if (typeof onCompleted === 'function') onCompleted();
+      } else if (typeof onChange === 'function') {
+        onChange(r);
+      }
+    }
+  );
+}
+
+// Live vehicle positions: fires onVehicle(row) whenever a vehicle row in
+// the company changes (the location mirror updates last_lat/last_lng).
+// Row-level security decides who actually receives each event: an outlet
+// only gets the van on its own active delivery, a manager gets company
+// vehicles — same visibility as a normal read, nothing extra.
+function initVehicleLiveUpdates(profile, onVehicle) {
+  if (!profile || !profile.company_id) return null;
+  return fleetSubscribe(
+    'vehicle-moves-' + profile.company_id,
+    {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'vehicles',
+      filter: 'company_id=eq.' + profile.company_id,
+    },
+    function (payload) {
+      var v = payload && payload.new;
+      if (v && v.id && typeof onVehicle === 'function') onVehicle(v);
     }
   );
 }

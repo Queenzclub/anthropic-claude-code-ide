@@ -21,8 +21,8 @@ function initOutletPage(ctx) {
   // RLS migration 8 lets an outlet read a vehicle row only while it is on
   // an active job for their own outlet — so this only ever shows the van
   // bringing their own delivery.
-  var map = null;
-  var markersLayer = null;
+  var liveMap = createLiveVehicleMap('trackMap');
+  var trackedById = {};   // latest known vehicles on our active deliveries
 
   // Outlet-facing tracking state for a vehicle on our own delivery.
   // "Waiting for driver location" until the driver shares a point,
@@ -46,7 +46,7 @@ function initOutletPage(ctx) {
     if (!ids.length) return {};
     var res = await window.sb
       .from('vehicles')
-      .select('id, vehicle_name, plate_number, last_lat, last_lng, last_updated')
+      .select('id, vehicle_name, plate_number, status, last_lat, last_lng, last_updated')
       .in('id', ids);
     var byId = {};
     if (!res.error && res.data) res.data.forEach(function (v) { byId[v.id] = v; });
@@ -56,16 +56,23 @@ function initOutletPage(ctx) {
   function renderTrackMap(vehicles) {
     var mapEl = document.getElementById('trackMap');
     var emptyEl = document.getElementById('trackEmpty');
+
+    // Remember the tracked set so live position events know what's ours.
+    trackedById = {};
+    vehicles.forEach(function (v) { if (v) trackedById[v.id] = v; });
+
     var located = vehicles.filter(function (v) { return v && v.last_lat != null && v.last_lng != null; });
 
     if (!vehicles.length) {
       if (mapEl) mapEl.classList.add('hidden');
+      liveMap.sync([], function () { return ''; });
       emptyEl.textContent = 'No vehicle to track yet. A map appears here when a driver is on the way for one of your active requests.';
       emptyEl.classList.remove('hidden');
       return;
     }
     if (!located.length) {
       if (mapEl) mapEl.classList.add('hidden');
+      liveMap.sync([], function () { return ''; });
       emptyEl.textContent = 'Waiting for driver location. The map appears once the driver turns on location sharing.';
       emptyEl.classList.remove('hidden');
       return;
@@ -79,26 +86,23 @@ function initOutletPage(ctx) {
     emptyEl.classList.add('hidden');
     if (mapEl) mapEl.classList.remove('hidden');
 
-    if (!map) {
-      map = L.map('trackMap');
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
-      }).addTo(map);
-      markersLayer = L.layerGroup().addTo(map);
-      map.setView([3.139, 101.6869], 12);
-    }
-    markersLayer.clearLayers();
-    var bounds = [];
-    located.forEach(function (v) {
-      var fresh = outletTrackState(v);
-      var popup = '<strong>' + escapeHtml(v.vehicle_name) + '</strong> · ' + escapeHtml(v.plate_number) +
-        '<br>Updated: ' + escapeHtml(fmtTime(v.last_updated)) + ' (' + escapeHtml(fresh.label) + ')';
-      markersLayer.addLayer(L.marker([v.last_lat, v.last_lng]).bindPopup(popup));
-      bounds.push([v.last_lat, v.last_lng]);
-    });
-    map.invalidateSize();
-    if (bounds.length === 1) map.setView(bounds[0], 14);
-    else map.fitBounds(bounds, { padding: [30, 30], maxZoom: 15 });
+    // Incremental: moves existing markers, adds new ones, removes ones
+    // whose delivery closed. Zoom/pan is kept after the first auto-fit.
+    liveMap.sync(located, function (v) { return vehiclePopupHtml(v); });
+  }
+
+  // A live position event for one of OUR delivery vans: move its marker
+  // in place — no list re-render, no map rebuild. RLS already limits
+  // which vehicles' events reach an outlet; the trackedById check is
+  // belt-and-braces on top.
+  function onVehicleMove(v) {
+    if (!trackedById[v.id]) return;
+    trackedById[v.id] = v;
+    if (v.last_lat == null || v.last_lng == null || !window.L) return;
+    document.getElementById('trackEmpty').classList.add('hidden');
+    var mapEl = document.getElementById('trackMap');
+    if (mapEl) mapEl.classList.remove('hidden');
+    liveMap.move(v, vehiclePopupHtml(v));
   }
 
   // Count of this outlet's deliveries completed since midnight (its own
@@ -284,12 +288,23 @@ function initOutletPage(ctx) {
   loadRequests();
   loadHistory();
 
-  // Live notification when one of this outlet's own deliveries completes.
+  // Live updates while the app is open:
+  // - completion toast + list refresh when our delivery completes
+  // - list/map resync on any other change to our requests (driver
+  //   accepted, trip started, cancelled)
+  // - marker moves in place when our delivery van's position changes
   if (typeof initOutletNotifications === 'function') {
     initOutletNotifications(profile, function () {
       loadHistory();
       loadRequests();
+    }, function () {
+      loadRequests();
     });
+    initVehicleLiveUpdates(profile, onVehicleMove);
     initAlertsButton('enableAlerts');
   }
+
+  // Gentle polling fallback (30s) in case realtime is unavailable —
+  // refreshes cards, summary, freshness labels and the tracking map.
+  setInterval(loadRequests, 30000);
 }

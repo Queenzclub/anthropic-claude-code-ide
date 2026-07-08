@@ -192,7 +192,10 @@ function initDriverPage(ctx) {
   // job so the location is tied to the right vehicle, and stops
   // automatically when the job ends.
 
-  var LOCATION_INTERVAL_MS = 45000;
+  // 30s balances live-feeling maps against phone battery. Phones pause
+  // JS timers/GPS when the app is closed or the screen locks (especially
+  // iPhone), so updates flow while the app stays open in the foreground.
+  var LOCATION_INTERVAL_MS = 30000;
   var sharing = { on: false, timer: null };
   var locStatus = document.getElementById('locStatus');
   var locLast = document.getElementById('locLast');

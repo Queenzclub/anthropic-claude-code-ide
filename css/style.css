@@ -385,6 +385,17 @@ code {
 }
 .toast-out { opacity: 0; transform: translateY(-6px); }
 
+/* Van marker on the live maps (replaces the default blue pin). */
+.van-marker {
+  font-size: 20px;
+  line-height: 30px;
+  text-align: center;
+  background: #1b2233;
+  border: 2px solid rgba(120, 150, 220, 0.55);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
 #vehicleMap, #trackMap {
   height: 320px;
   border-radius: 12px;

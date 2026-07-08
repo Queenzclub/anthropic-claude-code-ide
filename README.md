@@ -110,6 +110,23 @@ subscription plus a server or Supabase Edge Function that sends the
 push. That is a deliberate later step; today, alerts require the app to
 be open in the background.
 
+## Live maps
+
+The outlet Track My Deliveries map and the manager vehicle map update
+**live** while the page is open: vehicle markers (a van icon) move in
+place as new positions arrive over Supabase Realtime, with a gentle
+polling fallback. The view auto-fits once, then your zoom/pan is kept.
+Row-level security scopes the live events exactly like normal reads —
+an outlet only receives the van on its own active delivery; a manager
+only receives their company's vehicles.
+
+**Phone limitation for drivers:** browsers pause JS timers and GPS when
+the app is fully closed or the screen is locked (especially iOS), so
+location updates flow while the driver keeps the app open. The driver
+screen says this next to the Share Location button. Continuous
+background GPS would require a native app wrapper — out of scope for
+now.
+
 ## Creating users
 
 Login accounts are created in the **Supabase Dashboard**
