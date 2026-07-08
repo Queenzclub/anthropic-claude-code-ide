@@ -85,6 +85,100 @@ function timesHtml(r) {
   return '<div class="meta">' + parts.map(escapeHtml).join(' · ') + '</div>';
 }
 
+// Shared popup for a vehicle marker: name, plate, status, updated time
+// and freshness. driverName is optional (managers see it, outlets don't).
+function vehiclePopupHtml(v, opts) {
+  opts = opts || {};
+  var fresh = locationFreshness(v.last_updated);
+  var html = '<strong>' + escapeHtml(v.vehicle_name) + '</strong> · ' + escapeHtml(v.plate_number);
+  if (v.status) html += '<br>Status: ' + escapeHtml(STATUS_LABELS[v.status] || v.status);
+  if (opts.driverName) html += '<br>Driver: ' + escapeHtml(opts.driverName);
+  html += '<br>Updated: ' + escapeHtml(fmtTime(v.last_updated)) + ' (' + escapeHtml(fresh.label) + ')';
+  return html;
+}
+
+// A vehicle map whose markers update IN PLACE. Markers are keyed by
+// vehicle id: new locations move the existing marker (popup stays put,
+// no flicker) instead of rebuilding the layer. The view auto-fits only
+// on the first locations, then the user's pan/zoom is left alone.
+function createLiveVehicleMap(mapElId) {
+  var map = null;
+  var markers = {};
+  var fitted = false;
+
+  function vanIcon() {
+    return L.divIcon({
+      className: 'van-marker',
+      html: '🚐',
+      iconSize: [34, 34],
+      iconAnchor: [17, 17],
+      popupAnchor: [0, -16],
+    });
+  }
+
+  function ensureMap(center) {
+    if (map || !window.L) return;
+    map = L.map(mapElId);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+    }).addTo(map);
+    map.setView(center || [3.139, 101.6869], 12);
+  }
+
+  function upsert(v, popupHtml) {
+    if (!window.L || v.last_lat == null || v.last_lng == null) return;
+    ensureMap([v.last_lat, v.last_lng]);
+    var m = markers[v.id];
+    if (m) {
+      m.setLatLng([v.last_lat, v.last_lng]);
+      m.setPopupContent(popupHtml);
+    } else {
+      m = L.marker([v.last_lat, v.last_lng], { icon: vanIcon() }).bindPopup(popupHtml);
+      m.addTo(map);
+      markers[v.id] = m;
+    }
+  }
+
+  function fitOnce() {
+    if (fitted || !map) return;
+    var pts = Object.keys(markers).map(function (id) { return markers[id].getLatLng(); });
+    if (!pts.length) return;
+    if (pts.length === 1) map.setView(pts[0], 14);
+    else map.fitBounds(pts, { padding: [30, 30], maxZoom: 15 });
+    fitted = true;
+  }
+
+  return {
+    // Full sync against the current vehicle list: moves/adds markers for
+    // located vehicles, removes markers whose vehicle is gone (e.g. the
+    // job completed). Returns how many markers are on the map.
+    sync: function (vehicles, popupFor) {
+      var keep = {};
+      (vehicles || []).forEach(function (v) {
+        if (v.last_lat == null || v.last_lng == null) return;
+        keep[v.id] = true;
+        upsert(v, popupFor(v));
+      });
+      Object.keys(markers).forEach(function (id) {
+        if (!keep[id]) {
+          map.removeLayer(markers[id]);
+          delete markers[id];
+        }
+      });
+      fitOnce();
+      if (map) map.invalidateSize();
+      return Object.keys(markers).length;
+    },
+    // Single live update (realtime event): move or add one marker.
+    move: function (v, popupHtml) {
+      upsert(v, popupHtml);
+      fitOnce();
+      if (map) map.invalidateSize();
+    },
+    count: function () { return Object.keys(markers).length; },
+  };
+}
+
 // Shows a message in the page's #flash area. type: 'success' | 'error'.
 function showFlash(message, type) {
   var host = document.getElementById('flash');
