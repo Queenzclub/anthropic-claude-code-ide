@@ -110,6 +110,22 @@ subscription plus a server or Supabase Edge Function that sends the
 push. That is a deliberate later step; today, alerts require the app to
 be open in the background.
 
+## Dispatch selection
+
+Requests can go to **any available driver** (open dispatch, the
+default: every on-duty driver in the company sees it, first to accept
+wins) or to **one specific driver** (only that driver sees and can
+accept it — even while off duty). The picker lists come from a
+column-safe database function that exposes only driver name, duty
+status and van — an outlet still cannot read phone numbers or license
+details, and never sees another company.
+
+Managers can also **create a manual request** from any pickup/drop-off
+place — with optional map pins — without an outlet attached. Such
+requests show as "🧑‍💼 Manager request" and are invisible to outlet
+accounts. Manager assignment on pending cards remains the override
+path.
+
 ## Driver duty status
 
 Drivers go **On Duty / Off Duty** from their dashboard. Open requests

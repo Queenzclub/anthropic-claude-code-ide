@@ -115,8 +115,9 @@ function initDriverPage(ctx) {
         ? '<span class="chip">🎯 For you</span>'
         : '<span class="chip">📢 Open request</span>';
       var outletName = r.outlets && r.outlets.name;
+      var origin = outletName ? '🏬 ' + escapeHtml(outletName) : '🧑‍💼 Manager request';
       return requestCardHtml(r, {
-        topLine: (outletName ? '🏬 ' + escapeHtml(outletName) + ' ' : '') + mode,
+        topLine: origin + ' ' + mode,
         actionsHtml: '<button class="btn btn-primary btn-block" type="button" data-action="accept">Accept Job</button>',
       });
     }).join('');
@@ -199,7 +200,7 @@ function initDriverPage(ctx) {
 
       var outletName = r.outlets && r.outlets.name;
       return requestCardHtml(r, {
-        topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '',
+        topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '🧑‍💼 Manager request',
         extraHtml: extra,
         actionsHtml: actions,
       });

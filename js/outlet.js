@@ -17,6 +17,36 @@ function initOutletPage(ctx) {
 
   function val(id) { return document.getElementById(id).value.trim(); }
 
+  // ---------- Dispatch selection ----------
+  // dispatchable_drivers() is the column-safe list (name/duty/van only,
+  // own company only). Outlets pick from ON-DUTY drivers; the default
+  // stays "Any available driver". If the list can't load, the form
+  // silently falls back to open dispatch — sending never breaks.
+  var dispatchList = [];
+  var sendToEl = document.getElementById('sendTo');
+
+  async function loadDispatchList() {
+    if (!sendToEl || !window.sb.rpc) return;
+    var res = await window.sb.rpc('dispatchable_drivers');
+    if (res.error || !res.data) return;
+    dispatchList = res.data;
+    var current = sendToEl.value;
+    var options = '<option value="">🚚 Any available driver</option>';
+    dispatchList.filter(function (d) { return d.on_duty; }).forEach(function (d) {
+      var label = '🎯 ' + d.driver_name + (d.vehicle_name ? ' — ' + d.vehicle_name : '');
+      options += '<option value="' + escapeHtml(d.driver_id) + '">' + escapeHtml(label) + '</option>';
+    });
+    sendToEl.innerHTML = options;
+    sendToEl.value = current || '';
+  }
+
+  function dispatchName(driverId) {
+    for (var i = 0; i < dispatchList.length; i++) {
+      if (dispatchList[i].driver_id === driverId) return dispatchList[i].driver_name;
+    }
+    return null;
+  }
+
   // ---------- Delivery tracking map (own active deliveries only) ----------
   // RLS migration 8 lets an outlet read a vehicle row only while it is on
   // an active job for their own outlet — so this only ever shows the van
@@ -144,7 +174,7 @@ function initOutletPage(ctx) {
   async function loadRequests() {
     var res = await window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, driver_id, vehicle_id, created_at')
+      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, driver_id, vehicle_id, dispatch_mode, target_driver_id, created_at')
       .eq('outlet_id', profile.outlet_id)
       .in('status', ['pending', 'accepted', 'in_progress'])
       .order('created_at', { ascending: false });
@@ -172,6 +202,10 @@ function initOutletPage(ctx) {
       // Outlet users see THAT a driver is assigned (not who), and — for
       // their own active delivery — the assigned van and its freshness.
       var chips = '';
+      if (r.status === 'pending' && r.dispatch_mode === 'specific') {
+        var targetName = dispatchName(r.target_driver_id);
+        chips += '<span class="chip">🎯 Waiting for ' + escapeHtml(targetName || 'chosen driver') + '</span>';
+      }
       if (r.driver_id) chips += '<span class="chip">👤 Driver assigned</span>';
       var v = r.vehicle_id && vehiclesById[r.vehicle_id];
       if (v) {
@@ -205,20 +239,33 @@ function initOutletPage(ctx) {
     }
 
     submitBtn.disabled = true;
-    // Outlet requests are OPEN dispatch: sent to all on-duty drivers,
-    // first one to accept takes it. (Outlets don't pick vehicles.)
-    var res = await window.sb.from('vehicle_requests').insert({
+    // Default is OPEN dispatch (all on-duty drivers, first to accept
+    // wins). Picking a driver makes it SPECIFIC: only that driver sees
+    // and can accept it.
+    var targetId = sendToEl ? sendToEl.value : '';
+    var target = null;
+    if (targetId) {
+      for (var i = 0; i < dispatchList.length; i++) {
+        if (dispatchList[i].driver_id === targetId) { target = dispatchList[i]; break; }
+      }
+    }
+    var row = {
       company_id: profile.company_id,
       outlet_id: profile.outlet_id,
       requested_by: profile.user_id,
       status: 'pending',
-      dispatch_mode: 'open',
+      dispatch_mode: target ? 'specific' : 'open',
       pickup_location: pickup,
       dropoff_location: dropoff,
       customer_name: val('customerName') || null,
       customer_contact: val('customerContact') || null,
       notes: val('notes') || null,
-    });
+    };
+    if (target) {
+      row.target_driver_id = target.driver_id;
+      row.target_vehicle_id = target.vehicle_id || null;
+    }
+    var res = await window.sb.from('vehicle_requests').insert(row);
     submitBtn.disabled = false;
 
     if (res.error) {
@@ -228,7 +275,9 @@ function initOutletPage(ctx) {
 
     form.reset();
     document.getElementById('requestFormHost').classList.add('hidden');
-    showFlash('Request sent to available drivers.', 'success');
+    showFlash(target
+      ? 'Request sent to ' + target.driver_name + '.'
+      : 'Request sent to available drivers.', 'success');
     loadRequests();
   });
 
@@ -236,7 +285,10 @@ function initOutletPage(ctx) {
   var formHost = document.getElementById('requestFormHost');
   document.getElementById('toggleRequestBtn').addEventListener('click', function () {
     formHost.classList.toggle('hidden');
-    if (!formHost.classList.contains('hidden')) document.getElementById('pickup').focus();
+    if (!formHost.classList.contains('hidden')) {
+      loadDispatchList();
+      document.getElementById('pickup').focus();
+    }
   });
   document.getElementById('cancelRequestBtn').addEventListener('click', function () {
     form.reset();
@@ -285,7 +337,7 @@ function initOutletPage(ctx) {
     loadRequests();
     loadHistory();
   });
-  loadRequests();
+  loadDispatchList().then(loadRequests);
   loadHistory();
 
   // Live updates while the app is open:
