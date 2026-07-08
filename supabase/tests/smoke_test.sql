@@ -453,4 +453,78 @@ with hit as (
 select count(*) as flipped_other_driver from hit;
 reset role;
 
+-- ============ Dispatch selection (2B-2) ============
+\echo 'TEST 34: manager creates a manual request with NO outlet -> on-duty driver sees it (1), outlet does NOT (0)'
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000002', false) \g /dev/null
+insert into public.vehicle_requests
+  (id, company_id, outlet_id, status, dispatch_mode, pickup_location, dropoff_location, requested_by)
+values
+  ('70000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000001',
+   null, 'pending', 'open', 'Warehouse 7', 'Hotel Beachfront',
+   'a0000000-0000-0000-0000-000000000002');
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+select count(*) as driver_sees_manager_request
+from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000005';
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', false) \g /dev/null
+select count(*) as outlet_sees_manager_request
+from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000005';
+\echo 'TEST 34b: outlet cannot create an outlet-less request (expect PASS)'
+do $$ begin
+  insert into public.vehicle_requests
+    (company_id, outlet_id, status, dispatch_mode, pickup_location, dropoff_location, requested_by)
+  values
+    ('10000000-0000-0000-0000-000000000001', null, 'pending', 'open', 'X', 'Y',
+     'a0000000-0000-0000-0000-000000000003');
+  raise exception 'FAIL: outlet inserted a request without an outlet';
+exception when insufficient_privilege or check_violation then
+  raise notice 'PASS: outlet-less insert blocked for outlet role -> %', sqlerrm;
+end $$;
+reset role;
+
+\echo 'TEST 35: dispatchable_drivers() gives an outlet names+duty (rows>0) while direct drivers reads stay blocked (0); other company gets nothing (0)'
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', false) \g /dev/null
+select count(*) > 0 as outlet_gets_driver_list from public.dispatchable_drivers();
+select count(*) as outlet_direct_drivers_read from public.drivers;
+select set_config('request.jwt.claim.sub', 'b0000000-0000-0000-0000-000000000001', false) \g /dev/null
+select count(*) as other_company_driver_list from public.dispatchable_drivers();
+reset role;
+
+\echo 'TEST 36: outlet creates a SPECIFIC request for Driver Two -> Driver One cannot see or claim it (0, PASS); specific-without-target insert is rejected (PASS)'
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', false) \g /dev/null
+insert into public.vehicle_requests
+  (id, company_id, outlet_id, status, dispatch_mode, target_driver_id, pickup_location, dropoff_location, requested_by)
+values
+  ('70000000-0000-0000-0000-000000000006', '10000000-0000-0000-0000-000000000001',
+   '30000000-0000-0000-0000-000000000001', 'pending', 'specific',
+   '40000000-0000-0000-0000-000000000002', 'Main Shop', 'Marina',
+   'a0000000-0000-0000-0000-000000000003');
+do $$ begin
+  insert into public.vehicle_requests
+    (company_id, outlet_id, status, dispatch_mode, pickup_location, dropoff_location, requested_by)
+  values
+    ('10000000-0000-0000-0000-000000000001', '30000000-0000-0000-0000-000000000001',
+     'pending', 'specific', 'Main Shop', 'Nowhere',
+     'a0000000-0000-0000-0000-000000000003');
+  raise exception 'FAIL: specific request without a target was accepted';
+exception when check_violation then
+  raise notice 'PASS: specific-without-target rejected -> %', sqlerrm;
+end $$;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+select count(*) as driver1_sees_driver2_request
+from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000006';
+do $$ begin
+  update public.vehicle_requests
+    set status = 'accepted', driver_id = app.my_driver_id()
+    where id = '70000000-0000-0000-0000-000000000006';
+  if not found then
+    raise notice 'PASS: Driver One cannot claim Driver Two''s targeted request';
+  else
+    raise exception 'FAIL: claimed another driver''s targeted request';
+  end if;
+end $$;
+reset role;
+
 \echo '=== ALL SMOKE TESTS DONE ==='

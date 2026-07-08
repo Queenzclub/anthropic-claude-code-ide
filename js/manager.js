@@ -8,6 +8,153 @@ function initManagerPage(ctx) {
   var activeEl = document.getElementById('activeList');
   var busyDriverIds = [];
 
+  // Where a request came from: the outlet's name, or a manager.
+  function originLine(r) {
+    var outletName = r.outlets && r.outlets.name;
+    return outletName ? '🏬 ' + escapeHtml(outletName) : '🧑‍💼 Manager request';
+  }
+
+  // ---------- Create Request (manual dispatch) ----------
+  // Managers can start a delivery from ANY pickup/drop-off place —
+  // outlet_id stays null and RLS keeps such requests invisible to
+  // outlets. "Send to" picks open dispatch (default) or one specific
+  // driver; manager assignment on pending cards stays the override.
+  var dispatchList = [];
+  var mSendTo = document.getElementById('mSendTo');
+  var createHost = document.getElementById('createFormHost');
+  var pins = { pickup: null, dropoff: null, mode: null, map: null, markers: {} };
+
+  async function loadDispatchList() {
+    if (!mSendTo || !window.sb.rpc) return;
+    var res = await window.sb.rpc('dispatchable_drivers');
+    if (res.error || !res.data) return;
+    dispatchList = res.data;
+    var current = mSendTo.value;
+    // Managers see ALL active drivers, with duty visible in the label.
+    var options = '<option value="">🚚 Any available driver</option>';
+    dispatchList.forEach(function (d) {
+      var label = (d.on_duty ? '🟢 ' : '⚪ ') + d.driver_name +
+        (d.vehicle_name ? ' — ' + d.vehicle_name : '') +
+        (d.on_duty ? '' : ' (off duty)');
+      options += '<option value="' + escapeHtml(d.driver_id) + '">' + escapeHtml(label) + '</option>';
+    });
+    mSendTo.innerHTML = options;
+    mSendTo.value = current || '';
+  }
+
+  function renderPinStatus() {
+    var parts = [];
+    if (pins.pickup) parts.push('📍 pickup pinned');
+    if (pins.dropoff) parts.push('🏁 drop-off pinned');
+    if (pins.mode) parts.push('tap the map to place the ' + pins.mode + ' pin');
+    document.getElementById('pinStatus').textContent = parts.join(' · ');
+  }
+
+  function ensurePinMap() {
+    var el = document.getElementById('pinMap');
+    el.classList.remove('hidden');
+    if (pins.map || !window.L) return;
+    pins.map = L.map('pinMap');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+    }).addTo(pins.map);
+    pins.map.setView([3.139, 101.6869], 12);
+    pins.map.on('click', function (e) {
+      if (!pins.mode) return;
+      var kind = pins.mode;
+      pins[kind] = { lat: e.latlng.lat, lng: e.latlng.lng };
+      if (pins.markers[kind]) pins.markers[kind].setLatLng(e.latlng);
+      else pins.markers[kind] = L.marker(e.latlng).addTo(pins.map)
+        .bindPopup(kind === 'pickup' ? '📍 Pickup' : '🏁 Drop-off');
+      pins.mode = null;
+      renderPinStatus();
+    });
+    setTimeout(function () { pins.map.invalidateSize(); }, 50);
+  }
+
+  function armPin(kind) {
+    ensurePinMap();
+    pins.mode = kind;
+    renderPinStatus();
+    if (pins.map) setTimeout(function () { pins.map.invalidateSize(); }, 50);
+  }
+
+  function resetCreateForm() {
+    document.getElementById('createForm').reset();
+    pins.pickup = null;
+    pins.dropoff = null;
+    pins.mode = null;
+    Object.keys(pins.markers).forEach(function (k) {
+      if (pins.map) pins.map.removeLayer(pins.markers[k]);
+    });
+    pins.markers = {};
+    renderPinStatus();
+  }
+
+  async function submitCreate(e) {
+    e.preventDefault();
+    var pickup = document.getElementById('mPickup').value.trim();
+    var dropoff = document.getElementById('mDropoff').value.trim();
+    if (!pickup || !dropoff) {
+      showFlash('Please fill in pickup and drop-off locations.', 'error');
+      return;
+    }
+    var btn = document.getElementById('createSubmitBtn');
+    btn.disabled = true;
+    var targetId = mSendTo ? mSendTo.value : '';
+    var target = null;
+    for (var i = 0; i < dispatchList.length; i++) {
+      if (dispatchList[i].driver_id === targetId) { target = dispatchList[i]; break; }
+    }
+    var row = {
+      company_id: ctx.profile.company_id,
+      outlet_id: null,
+      requested_by: ctx.profile.user_id,
+      status: 'pending',
+      dispatch_mode: target ? 'specific' : 'open',
+      pickup_location: pickup,
+      dropoff_location: dropoff,
+      customer_name: document.getElementById('mCustomerName').value.trim() || null,
+      customer_contact: document.getElementById('mCustomerContact').value.trim() || null,
+      notes: document.getElementById('mNotes').value.trim() || null,
+      pickup_lat: pins.pickup ? pins.pickup.lat : null,
+      pickup_lng: pins.pickup ? pins.pickup.lng : null,
+      dropoff_lat: pins.dropoff ? pins.dropoff.lat : null,
+      dropoff_lng: pins.dropoff ? pins.dropoff.lng : null,
+    };
+    if (target) {
+      row.target_driver_id = target.driver_id;
+      row.target_vehicle_id = target.vehicle_id || null;
+    }
+    var res = await window.sb.from('vehicle_requests').insert(row);
+    btn.disabled = false;
+    if (res.error) {
+      showFlash('Could not create request. Please try again.', 'error');
+      return;
+    }
+    resetCreateForm();
+    createHost.classList.add('hidden');
+    showFlash(target
+      ? 'Request sent to ' + target.driver_name + '.'
+      : 'Request sent to available drivers.', 'success');
+    loadAll();
+  }
+
+  document.getElementById('toggleCreateBtn').addEventListener('click', function () {
+    createHost.classList.toggle('hidden');
+    if (!createHost.classList.contains('hidden')) {
+      loadDispatchList();
+      document.getElementById('mPickup').focus();
+    }
+  });
+  document.getElementById('createCancelBtn').addEventListener('click', function () {
+    resetCreateForm();
+    createHost.classList.add('hidden');
+  });
+  document.getElementById('pinPickupBtn').addEventListener('click', function () { armPin('pickup'); });
+  document.getElementById('pinDropoffBtn').addEventListener('click', function () { armPin('dropoff'); });
+  document.getElementById('createForm').addEventListener('submit', submitCreate);
+
   async function loadPending() {
     var res = await window.sb
       .from('vehicle_requests')
@@ -24,9 +171,8 @@ function initManagerPage(ctx) {
       return;
     }
     pendingEl.innerHTML = res.data.map(function (r) {
-      var outletName = r.outlets && r.outlets.name;
       return requestCardHtml(r, {
-        topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '',
+        topLine: originLine(r),
         actionsHtml:
           '<button class="btn btn-primary" type="button" data-action="assign">Assign</button>' +
           '<button class="btn btn-outline" type="button" data-action="cancel">Cancel Request</button>',
@@ -61,9 +207,8 @@ function initManagerPage(ctx) {
         chips += '<span class="chip">🚐 ' + escapeHtml(r.vehicles.vehicle_name) +
                  ' · ' + escapeHtml(r.vehicles.plate_number) + '</span>';
       }
-      var outletName = r.outlets && r.outlets.name;
       return requestCardHtml(r, {
-        topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '',
+        topLine: originLine(r),
         extraHtml: chips + timesHtml(r),
       });
     }).join('');
@@ -160,9 +305,8 @@ function initManagerPage(ctx) {
         extra += '<div class="meta">💬 Reason: ' + escapeHtml(r.cancellation_reason) + '</div>';
       }
       extra += timesHtml(r);
-      var outletName = r.outlets && r.outlets.name;
       return requestCardHtml(r, {
-        topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '',
+        topLine: originLine(r),
         extraHtml: extra,
       });
     }).join('');

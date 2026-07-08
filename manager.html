@@ -36,6 +36,53 @@
       </section>
 
       <section style="margin-top: 1.75rem;">
+        <button id="toggleCreateBtn" class="btn btn-primary btn-block" type="button">➕ Create Request</button>
+        <div id="createFormHost" class="panel hidden" style="margin-top: 0.75rem;">
+          <form id="createForm" class="form-grid" novalidate>
+            <div class="field">
+              <label for="mPickup">Pickup location *</label>
+              <input id="mPickup" required placeholder="Where should the driver collect?">
+            </div>
+            <div class="field">
+              <label for="mDropoff">Drop-off location *</label>
+              <input id="mDropoff" required placeholder="Where should it go?">
+            </div>
+            <div class="field">
+              <label for="mCustomerName">Customer name</label>
+              <input id="mCustomerName" placeholder="Customer or receiver name">
+            </div>
+            <div class="field">
+              <label for="mCustomerContact">Customer contact</label>
+              <input id="mCustomerContact" placeholder="Phone number">
+            </div>
+            <div class="field full">
+              <label for="mNotes">Delivery notes</label>
+              <textarea id="mNotes" placeholder="Items, quantity, special instructions…"></textarea>
+            </div>
+            <div class="field full">
+              <label for="mSendTo">Send to</label>
+              <select id="mSendTo">
+                <option value="">🚚 Any available driver</option>
+              </select>
+            </div>
+            <div class="field full">
+              <label>Map pins (optional)</label>
+              <div class="request-actions" style="margin-bottom: 0.5rem;">
+                <button id="pinPickupBtn" class="btn btn-outline btn-small" type="button">📍 Set pickup pin</button>
+                <button id="pinDropoffBtn" class="btn btn-outline btn-small" type="button">🏁 Set drop-off pin</button>
+              </div>
+              <div id="pinMap" class="hidden"></div>
+              <p class="muted small" id="pinStatus"></p>
+            </div>
+            <div class="full request-actions">
+              <button id="createSubmitBtn" class="btn btn-primary" type="submit">Send Request</button>
+              <button id="createCancelBtn" class="btn btn-outline" type="button">Cancel</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
         <div class="section-head">
           <h3>🕐 Pending Requests</h3>
           <button id="refreshPending" class="btn btn-outline btn-small" type="button">Refresh</button>

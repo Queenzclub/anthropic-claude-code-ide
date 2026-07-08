@@ -434,7 +434,7 @@ function initAdminPage(ctx) {
       extra += timesHtml(r);
       var outletName = r.outlets && r.outlets.name;
       return requestCardHtml(r, {
-        topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '',
+        topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '🧑‍💼 Manager request',
         extraHtml: extra,
       });
     }).join('');
