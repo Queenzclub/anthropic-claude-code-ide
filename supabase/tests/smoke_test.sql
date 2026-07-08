@@ -384,4 +384,73 @@ select exists(
 ) as outlet_can_track_van;
 reset role;
 
+-- ============ Driver duty status (2B-1) ============
+-- Backfill in migration 12 put existing active drivers ON duty.
+-- Fresh open request + one targeted at driver 1 for these tests.
+select set_config('request.jwt.claim.sub', '', false) \g /dev/null
+insert into public.vehicle_requests
+  (id, company_id, outlet_id, status, dispatch_mode, pickup_location, dropoff_location, requested_by)
+values
+  ('70000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000001',
+   '30000000-0000-0000-0000-000000000001', 'pending', 'open', 'Shop', 'Duty Test',
+   'a0000000-0000-0000-0000-000000000003');
+insert into public.vehicle_requests
+  (id, company_id, outlet_id, status, dispatch_mode, target_driver_id, pickup_location, dropoff_location, requested_by)
+values
+  ('70000000-0000-0000-0000-000000000004', '10000000-0000-0000-0000-000000000001',
+   '30000000-0000-0000-0000-000000000001', 'pending', 'specific',
+   '40000000-0000-0000-0000-000000000001', 'Shop', 'Targeted Duty Test',
+   'a0000000-0000-0000-0000-000000000003');
+
+\echo 'TEST 31: OFF-duty driver sees no open request (0) but still sees one targeted at them (1), and cannot accept the open one (PASS)'
+update public.drivers set on_duty = false where id = '40000000-0000-0000-0000-000000000001';
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+select
+  (select count(*) from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000003') as sees_open_off_duty,
+  (select count(*) from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000004') as sees_targeted_off_duty;
+do $$ begin
+  update public.vehicle_requests
+    set status = 'accepted', driver_id = app.my_driver_id()
+    where id = '70000000-0000-0000-0000-000000000003' and status = 'pending';
+  if not found then
+    raise notice 'PASS: off-duty driver cannot accept an open request';
+  else
+    raise exception 'FAIL: off-duty driver accepted an open request';
+  end if;
+end $$;
+reset role;
+
+\echo 'TEST 32: driver flips their OWN duty back on (expect t) and then sees the open request (1)'
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+update public.drivers
+  set on_duty = true, on_duty_since = now()
+  where id = app.my_driver_id()
+  returning on_duty;
+select count(*) as sees_open_on_duty
+from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000003';
+reset role;
+
+\echo 'TEST 33: driver cannot change their own name (PASS) and cannot flip another driver''s duty (0 rows)'
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+do $$ begin
+  update public.drivers set name = 'Hacker' where id = app.my_driver_id();
+  raise exception 'FAIL: driver changed their own name';
+exception when others then
+  if sqlerrm like '%admin can change driver details%' then
+    raise notice 'PASS: driver details locked -> %', sqlerrm;
+  else
+    raise;
+  end if;
+end $$;
+with hit as (
+  update public.drivers set on_duty = false
+  where id = '40000000-0000-0000-0000-000000000002'
+  returning 1
+)
+select count(*) as flipped_other_driver from hit;
+reset role;
+
 \echo '=== ALL SMOKE TESTS DONE ==='

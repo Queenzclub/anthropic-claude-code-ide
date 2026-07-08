@@ -110,6 +110,18 @@ subscription plus a server or Supabase Edge Function that sends the
 push. That is a deliberate later step; today, alerts require the app to
 be open in the background.
 
+## Driver duty status
+
+Drivers go **On Duty / Off Duty** from their dashboard. Open requests
+are only visible to on-duty drivers — enforced by row-level security,
+not just the UI — while requests targeted at a specific driver stay
+visible regardless. Going on duty starts location sharing (with the
+driver's permission) so idle on-duty vans appear on the manager map;
+going off duty stops it. Existing drivers were set on duty when the
+feature shipped; newly created drivers start off duty. As everywhere
+else in the app, location only flows while the driver keeps the app
+open — duty status does not enable background tracking.
+
 ## Live maps
 
 The outlet Track My Deliveries map and the manager vehicle map update
