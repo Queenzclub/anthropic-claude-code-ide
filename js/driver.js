@@ -11,11 +11,74 @@ function initDriverPage(ctx) {
   var jobsEl = document.getElementById('jobList');
   var availableEl = document.getElementById('availableList');
   var activeJobs = [];
+  var onDuty = false;
+  var ownVehicleId = profile.vehicle_id || null;
 
   if (!profile.driver_id) {
     jobsEl.innerHTML = '<div class="empty-state">Your account is not linked to a driver record yet. Please contact your admin.</div>';
     if (availableEl) availableEl.innerHTML = '';
     return;
+  }
+
+  // ---------- Duty status ----------
+  // The driver flips their own on_duty flag (RLS + a DB trigger allow
+  // exactly that and nothing else). Open requests are only visible
+  // while on duty — the database enforces it; the UI just explains it.
+  var dutyBadge = document.getElementById('dutyBadge');
+  var dutyToggle = document.getElementById('dutyToggle');
+  var dutyHint = document.getElementById('dutyHint');
+
+  function renderDuty() {
+    dutyBadge.textContent = onDuty ? 'On Duty' : 'Off Duty';
+    dutyBadge.className = 'badge ' + (onDuty ? 'badge-available' : 'badge-offline');
+    dutyToggle.textContent = onDuty ? 'Go Off Duty' : 'Go On Duty';
+    dutyToggle.classList.toggle('btn-primary', !onDuty);
+    dutyToggle.classList.toggle('btn-outline', onDuty);
+    dutyHint.textContent = onDuty
+      ? 'You receive open requests and share your location while on duty.'
+      : 'Go on duty to receive open delivery requests.';
+    dutyToggle.disabled = false;
+  }
+
+  async function loadDuty() {
+    var res = await window.sb.from('drivers')
+      .select('on_duty').eq('id', profile.driver_id).maybeSingle();
+    onDuty = !!(res && res.data && res.data.on_duty);
+    renderDuty();
+  }
+
+  async function toggleDuty() {
+    dutyToggle.disabled = true;
+    var next = !onDuty;
+    var res = await window.sb.from('drivers')
+      .update({ on_duty: next, on_duty_since: new Date().toISOString() })
+      .eq('id', profile.driver_id)
+      .select('on_duty');
+    if (res.error || !res.data || !res.data.length) {
+      dutyToggle.disabled = false;
+      showFlash('Could not change duty status. Please try again.', 'error');
+      return;
+    }
+    onDuty = res.data[0].on_duty;
+    renderDuty();
+    loadAvailable();
+    if (onDuty) {
+      showFlash('You are on duty', 'success');
+      if (!sharing.on) startSharing();
+    } else {
+      if (sharing.on) stopSharing('Location sharing stopped');
+      showFlash('You are off duty', 'success');
+    }
+  }
+  dutyToggle.addEventListener('click', toggleDuty);
+
+  // The driver's own van (used for location pings between jobs while on
+  // duty). profile.vehicle_id wins if the admin set a default vehicle.
+  async function loadOwnVehicle() {
+    if (ownVehicleId) return;
+    var res = await window.sb.from('vehicles')
+      .select('id').eq('driver_id', profile.driver_id).eq('active', true).limit(1);
+    if (!res.error && res.data && res.data.length) ownVehicleId = res.data[0].id;
   }
 
   // ---------- Available requests (dispatch inbox) ----------
@@ -42,7 +105,9 @@ function initDriverPage(ctx) {
     }
     setAvailBadge(res.data.length);
     if (!res.data.length) {
-      availableEl.innerHTML = '<div class="empty-state">No available requests right now.</div>';
+      availableEl.innerHTML = '<div class="empty-state">' + (onDuty
+        ? 'No available requests right now.'
+        : 'You are off duty. Only requests assigned directly to you appear here.') + '</div>';
       return;
     }
     availableEl.innerHTML = res.data.map(function (r) {
@@ -107,8 +172,9 @@ function initDriverPage(ctx) {
     }
     activeJobs = res.data;
 
-    // No active job: location sharing turns itself off.
-    if (sharing.on && !activeJobs.length) {
+    // Sharing turns itself off only when there is neither an active job
+    // nor an on-duty shift — on-duty drivers keep sharing between jobs.
+    if (sharing.on && !activeJobs.length && !onDuty) {
       stopSharing('Location sharing stopped');
     }
 
@@ -220,7 +286,9 @@ function initDriverPage(ctx) {
     var res = await window.sb.from('location_updates').insert({
       company_id: profile.company_id,
       driver_id: profile.driver_id,
-      vehicle_id: activeJobs.length ? activeJobs[0].vehicle_id : null,
+      // On a job: that job's vehicle. Between jobs while on duty: the
+      // driver's own van, so the manager map shows idle on-duty vans.
+      vehicle_id: activeJobs.length ? activeJobs[0].vehicle_id : ownVehicleId,
       lat: pos.coords.latitude,
       lng: pos.coords.longitude,
     });
@@ -248,8 +316,8 @@ function initDriverPage(ctx) {
   }
 
   function startSharing() {
-    if (!activeJobs.length) {
-      showFlash('No active job found for location sharing', 'error');
+    if (!activeJobs.length && !onDuty) {
+      showFlash('Go on duty or accept a job to share your location', 'error');
       return;
     }
     if (!navigator.geolocation) {
@@ -329,7 +397,8 @@ function initDriverPage(ctx) {
     loadJobs();
     loadRecent();
   });
-  loadAvailable();
+  loadDuty().then(loadAvailable);
+  loadOwnVehicle();
   loadJobs();
   loadRecent();
 

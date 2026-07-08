@@ -180,13 +180,19 @@ function initManagerPage(ctx) {
 
   function vehicleCardHtml(v) {
     var fresh = locationFreshness(v.last_updated);
+    var duty = '';
+    if (v.drivers) {
+      duty = v.drivers.on_duty
+        ? '<span class="chip fresh-live">🟢 On Duty</span>'
+        : '<span class="chip fresh-offline">⚪ Off Duty</span>';
+    }
     return '<div class="card">' +
       '<div class="request-top"><strong>' + escapeHtml(v.vehicle_name) + '</strong>' +
         statusBadge(v.status) + '</div>' +
       '<div class="meta">🔖 ' + escapeHtml(v.plate_number) + '</div>' +
       '<div class="meta">👤 ' + (v.drivers ? escapeHtml(v.drivers.name) : 'No driver assigned') + '</div>' +
       '<div class="meta">🕐 ' + (v.last_updated ? 'Updated ' + escapeHtml(fmtTime(v.last_updated)) : 'No location yet') + '</div>' +
-      '<span class="chip fresh-' + fresh.cls + '">' + escapeHtml(fresh.label) + '</span>' +
+      '<span class="chip fresh-' + fresh.cls + '">' + escapeHtml(fresh.label) + '</span>' + duty +
     '</div>';
   }
 
@@ -233,7 +239,7 @@ function initManagerPage(ctx) {
   async function loadVehicles() {
     var res = await window.sb
       .from('vehicles')
-      .select('id, vehicle_name, plate_number, status, last_lat, last_lng, last_updated, drivers(name)')
+      .select('id, vehicle_name, plate_number, status, last_lat, last_lng, last_updated, drivers(name, on_duty)')
       .eq('active', true)
       .order('vehicle_name', { ascending: true });
 

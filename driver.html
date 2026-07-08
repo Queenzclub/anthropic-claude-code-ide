@@ -27,7 +27,16 @@
 
       <div id="flash"></div>
 
-      <section>
+      <section class="panel">
+        <div class="section-head">
+          <h3>🧭 Duty Status</h3>
+          <span id="dutyBadge" class="badge"></span>
+        </div>
+        <p class="muted small" id="dutyHint">Go on duty to receive open delivery requests.</p>
+        <button id="dutyToggle" class="btn btn-primary btn-block" type="button" disabled>…</button>
+      </section>
+
+      <section style="margin-top: 1.75rem;">
         <div class="section-head">
           <h3>📥 Available Requests <span id="availBadge" class="count-badge hidden"></span></h3>
           <div class="section-head-actions">
