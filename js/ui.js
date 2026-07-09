@@ -11,7 +11,21 @@ var STATUS_LABELS = {
   busy: 'Busy',
   offline: 'Offline',
   maintenance: 'Maintenance',
+  service_due: 'Service Due',
+  in_service: 'In Service',
+  damaged: 'Damaged',
 };
+
+// Service states that take a vehicle OUT of dispatch (Stage 3A). These
+// mirror the database: the job->vehicle sync trigger never overwrites
+// them, and the dispatch pickers hide vehicles in these states.
+// 'service_due' is deliberately NOT here — it is advisory only, so a
+// service-due vehicle stays dispatchable (shown with an amber badge).
+var VEHICLE_UNAVAILABLE = ['maintenance', 'in_service', 'damaged'];
+
+function vehicleDispatchable(status) {
+  return VEHICLE_UNAVAILABLE.indexOf(status) === -1;
+}
 
 // Always escape user-entered text before putting it in HTML.
 function escapeHtml(value) {

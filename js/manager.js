@@ -380,11 +380,17 @@ function initManagerPage(ctx) {
     vehicleCache = {};
     res.data.forEach(function (v) { vehicleCache[v.id] = v; });
 
+    // Always show the core four; add a tile for a service state only when
+    // at least one vehicle is in it, so the overview stays uncluttered.
     var counts = { available: 0, busy: 0, offline: 0, maintenance: 0 };
+    var extra = { service_due: 0, in_service: 0, damaged: 0 };
     res.data.forEach(function (v) {
       if (counts[v.status] != null) counts[v.status] += 1;
+      else if (extra[v.status] != null) extra[v.status] += 1;
     });
-    statsEl.innerHTML = Object.keys(counts).map(function (k) {
+    var tiles = Object.keys(counts);
+    Object.keys(extra).forEach(function (k) { if (extra[k]) { counts[k] = extra[k]; tiles.push(k); } });
+    statsEl.innerHTML = tiles.map(function (k) {
       return '<div class="stat"><div class="stat-num">' + counts[k] + '</div>' +
         '<div class="stat-label">' + STATUS_LABELS[k] + '</div></div>';
     }).join('');
@@ -425,7 +431,10 @@ function initManagerPage(ctx) {
       return;
     }
 
-    var vehicles = vehiclesRes.data.filter(function (v) { return v.status !== 'maintenance'; });
+    // Vehicles out of service (maintenance / in service / damaged) are
+    // hidden from dispatch. Busy vehicles stay (multi-job queues), and a
+    // service-due vehicle stays selectable with an advisory note.
+    var vehicles = vehiclesRes.data.filter(function (v) { return vehicleDispatchable(v.status); });
     var drivers = driversRes.data;
 
     var backBtn = '<button class="btn btn-outline" type="button" data-action="close-panel">Back</button>';
@@ -442,9 +451,12 @@ function initManagerPage(ctx) {
 
     var vehicleOptions = vehicles.map(function (v) {
       var jobs = vehicleJobs(v.id);
+      var tags = [];
+      if (jobs) tags.push(jobs + ' job' + (jobs === 1 ? '' : 's'));
+      if (v.status === 'service_due') tags.push('⚠️ service due');
       return '<option value="' + escapeHtml(v.id) + '">' +
         escapeHtml(v.vehicle_name) + ' · ' + escapeHtml(v.plate_number) +
-        (jobs ? ' (' + jobs + ' job' + (jobs === 1 ? '' : 's') + ')' : '') + '</option>';
+        (tags.length ? ' (' + escapeHtml(tags.join(', ')) + ')' : '') + '</option>';
     }).join('');
     var driverOptions = drivers.map(function (d) {
       var jobs = driverJobs(d.id);

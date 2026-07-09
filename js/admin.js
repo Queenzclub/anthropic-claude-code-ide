@@ -320,7 +320,10 @@ function initAdminPage(ctx) {
   // ---------- Vehicles ----------
 
   function vehicleFormHtml(v, saveAction, saveLabel) {
-    var statuses = ['available', 'offline', 'maintenance'];
+    // Admin sets service state here. 'busy' is machine-driven (jobs), so it
+    // is only offered when the vehicle is currently busy — to keep it
+    // selectable — and the sync trigger owns it otherwise.
+    var statuses = ['available', 'offline', 'maintenance', 'service_due', 'in_service', 'damaged'];
     if (v && v.status === 'busy') statuses.unshift('busy'); // keep current value selectable
     var statusOptions = statuses.map(function (s) {
       return '<option value="' + s + '"' + (v && v.status === s ? ' selected' : '') + '>' + STATUS_LABELS[s] + '</option>';
@@ -361,8 +364,11 @@ function initAdminPage(ctx) {
     if (v) {
       data.status = readPanel(scope, 'vehicle-status') || v.status;
       data.driver_id = readPanel(scope, 'vehicle-driver') || null;
-      if (v.status === 'busy' && data.status === 'maintenance' &&
-          !window.confirm('This vehicle is busy on a job. Set it to maintenance anyway?')) {
+      // Taking a busy vehicle out of service mid-job is allowed (e.g. a
+      // breakdown), but confirm first so it is never accidental.
+      if (v.status === 'busy' && VEHICLE_UNAVAILABLE.indexOf(data.status) !== -1 &&
+          !window.confirm('This vehicle is busy on a job. Set it to ' +
+            (STATUS_LABELS[data.status] || data.status) + ' anyway?')) {
         return;
       }
     }
