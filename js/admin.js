@@ -79,7 +79,7 @@ function initAdminPage(ctx) {
     var results = await Promise.all([
       window.sb.from('outlets').select('id, name, address, phone, active').order('name', { ascending: true }),
       window.sb.from('drivers').select('id, name, phone, license_number, active').order('name', { ascending: true }),
-      window.sb.from('vehicles').select('id, vehicle_name, plate_number, status, driver_id, active').order('vehicle_name', { ascending: true }),
+      window.sb.from('vehicles').select('id, vehicle_name, plate_number, status, service_note, driver_id, active').order('vehicle_name', { ascending: true }),
       window.sb.from('profiles').select('user_id, name, email, phone, role, active, outlet_id, driver_id, outlets(name), drivers(name)').order('email', { ascending: true }),
     ]);
     if (results.some(function (r) { return r.error; })) {
@@ -348,6 +348,7 @@ function initAdminPage(ctx) {
         '<span>' + statusBadge(v.status) + ' ' + activeBadge(v.active) + '</span></div>' +
         '<div class="meta">🔖 ' + escapeHtml(v.plate_number) + '</div>' +
         (driver ? '<div class="meta">👤 ' + escapeHtml(driver.name) + '</div>' : '') +
+        (v.service_note ? '<div class="meta">📝 Reported: ' + escapeHtml(v.service_note) + '</div>' : '') +
         '<div class="request-actions">' +
           '<button class="btn btn-outline" type="button" data-action="edit-vehicle">Edit</button>' +
           '<button class="btn btn-outline" type="button" data-action="toggle-vehicle">' + (v.active ? 'Deactivate' : 'Activate') + '</button>' +
@@ -364,6 +365,8 @@ function initAdminPage(ctx) {
     if (v) {
       data.status = readPanel(scope, 'vehicle-status') || v.status;
       data.driver_id = readPanel(scope, 'vehicle-driver') || null;
+      // Returning a vehicle to service clears any reported issue note.
+      if (data.status === 'available' || data.status === 'offline') data.service_note = null;
       // Taking a busy vehicle out of service mid-job is allowed (e.g. a
       // breakdown), but confirm first so it is never accidental.
       if (v.status === 'busy' && VEHICLE_UNAVAILABLE.indexOf(data.status) !== -1 &&
