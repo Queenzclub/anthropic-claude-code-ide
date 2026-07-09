@@ -301,6 +301,18 @@ function initManagerPage(ctx) {
   var liveMap = createLiveVehicleMap('vehicleMap');
   var vehicleCache = {};  // id -> latest row (for driver names on live moves)
 
+  // The six states a manager can set directly. 'busy' is machine-driven,
+  // so it is only offered when the vehicle is currently busy (to keep the
+  // select showing its real value).
+  function svcStatusOptions(current) {
+    var opts = ['available', 'offline', 'maintenance', 'service_due', 'in_service', 'damaged'];
+    if (current === 'busy') opts.unshift('busy');
+    return opts.map(function (s) {
+      return '<option value="' + s + '"' + (s === current ? ' selected' : '') + '>' +
+        escapeHtml(STATUS_LABELS[s] || s) + '</option>';
+    }).join('');
+  }
+
   function vehicleCardHtml(v) {
     var fresh = locationFreshness(v.last_updated);
     var duty = '';
@@ -313,15 +325,60 @@ function initManagerPage(ctx) {
     var jobsChip = jobs
       ? '<span class="chip">📦 ' + jobs + ' active job' + (jobs === 1 ? '' : 's') + '</span>'
       : '';
-    return '<div class="card">' +
+    var note = v.service_note
+      ? '<div class="meta">📝 Reported: ' + escapeHtml(v.service_note) + '</div>'
+      : '';
+    var control = '<div class="svc-control">' +
+      '<select data-role="svc-status" aria-label="Service status">' + svcStatusOptions(v.status) + '</select>' +
+      '<button class="btn btn-outline btn-small" type="button" data-action="set-status">Update</button>' +
+    '</div>';
+    return '<div class="card" data-id="' + escapeHtml(v.id) + '">' +
       '<div class="request-top"><strong>' + escapeHtml(v.vehicle_name) + '</strong>' +
         statusBadge(v.status) + '</div>' +
       '<div class="meta">🔖 ' + escapeHtml(v.plate_number) + '</div>' +
       '<div class="meta">👤 ' + (v.drivers ? escapeHtml(v.drivers.name) : 'No driver assigned') + '</div>' +
       '<div class="meta">🕐 ' + (v.last_updated ? 'Updated ' + escapeHtml(fmtTime(v.last_updated)) : 'No location yet') + '</div>' +
+      note +
       '<span class="chip fresh-' + fresh.cls + '">' + escapeHtml(fresh.label) + '</span>' + duty + jobsChip +
+      control +
     '</div>';
   }
+
+  // Manager sets vehicle service status straight from the card. Busy ->
+  // an out-of-service state confirms first; RLS (vehicles_staff_update)
+  // and the status-safety trigger back this up on the server.
+  async function setVehicleStatus(id, newStatus, btn) {
+    var v = vehicleCache[id];
+    if (v && v.status === 'busy' && VEHICLE_UNAVAILABLE.indexOf(newStatus) !== -1 &&
+        !window.confirm('This vehicle is busy on a job. Set it to ' +
+          (STATUS_LABELS[newStatus] || newStatus) + ' anyway?')) {
+      return;
+    }
+    btn.disabled = true;
+    var upd = { status: newStatus };
+    // Returning a vehicle to service clears any reported issue note.
+    if (newStatus === 'available' || newStatus === 'offline') upd.service_note = null;
+    var res = await window.sb.from('vehicles').update(upd).eq('id', id).select('id');
+    if (res.error || !res.data || !res.data.length) {
+      btn.disabled = false;
+      if (((res.error && res.error.message) || '').indexOf('active job') !== -1) {
+        showFlash('This vehicle still has an active job and cannot be set to available.', 'error');
+      } else {
+        showFlash('Could not update vehicle status. Please try again.', 'error');
+      }
+      return;
+    }
+    showFlash('Vehicle status updated.', 'success');
+    loadVehicles();
+  }
+
+  vehiclesEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-action="set-status"]');
+    if (!btn) return;
+    var card = btn.closest('.card[data-id]');
+    var sel = card && card.querySelector('[data-role="svc-status"]');
+    if (card && sel) setVehicleStatus(card.getAttribute('data-id'), sel.value, btn);
+  });
 
   function vehiclePopup(v) {
     var html = vehiclePopupHtml(v, { driverName: v.drivers && v.drivers.name });
@@ -369,7 +426,7 @@ function initManagerPage(ctx) {
   async function loadVehicles() {
     var res = await window.sb
       .from('vehicles')
-      .select('id, vehicle_name, plate_number, status, last_lat, last_lng, last_updated, drivers(name, on_duty)')
+      .select('id, vehicle_name, plate_number, status, service_note, last_lat, last_lng, last_updated, drivers(name, on_duty)')
       .eq('active', true)
       .order('vehicle_name', { ascending: true });
 

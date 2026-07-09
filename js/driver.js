@@ -410,6 +410,66 @@ function initDriverPage(ctx) {
     else startSharing();
   });
 
+  // ---------- Report vehicle issue ----------
+  // A driver can flag ONLY their own linked vehicle as Service Due or
+  // Damaged (optionally with a short note). RLS plus a database guard
+  // trigger enforce this: no other vehicle, no other status, and a driver
+  // can never clear a reported issue — only a manager/admin can.
+  var reportedVehicle = null;
+  var reportVehicleEl = document.getElementById('reportVehicle');
+  var reportControls = document.getElementById('reportControls');
+  var reportNote = document.getElementById('reportNote');
+
+  function renderReport() {
+    if (!reportedVehicle) {
+      reportVehicleEl.textContent = 'No vehicle is linked to you yet. Ask your manager to link one.';
+      reportControls.classList.add('hidden');
+      return;
+    }
+    var v = reportedVehicle;
+    reportVehicleEl.innerHTML = '🚐 ' + escapeHtml(v.vehicle_name) + ' · ' + escapeHtml(v.plate_number) +
+      ' — ' + statusBadge(v.status);
+    if (v.service_note) {
+      reportVehicleEl.innerHTML += '<br><span class="muted">📝 ' + escapeHtml(v.service_note) + '</span>';
+    }
+    reportControls.classList.remove('hidden');
+  }
+
+  async function loadReportVehicle() {
+    await loadOwnVehicle();
+    var q = window.sb.from('vehicles').select('id, vehicle_name, plate_number, status, service_note');
+    q = ownVehicleId ? q.eq('id', ownVehicleId) : q.eq('driver_id', profile.driver_id);
+    var res = await q.limit(1);
+    reportedVehicle = (!res.error && res.data && res.data.length) ? res.data[0] : null;
+    if (reportedVehicle && !ownVehicleId) ownVehicleId = reportedVehicle.id;
+    renderReport();
+  }
+
+  async function reportIssue(newStatus, btn) {
+    if (!reportedVehicle) return;
+    btn.disabled = true;
+    var note = (reportNote.value || '').trim();
+    var upd = { status: newStatus };
+    if (note) upd.service_note = note;
+    var res = await window.sb.from('vehicles')
+      .update(upd)
+      .eq('id', reportedVehicle.id)
+      .select('id, status, service_note');
+    btn.disabled = false;
+    if (res.error || !res.data || !res.data.length) {
+      showFlash('Could not report the issue. Please try again.', 'error');
+      return;
+    }
+    reportedVehicle.status = res.data[0].status;
+    reportedVehicle.service_note = res.data[0].service_note;
+    reportNote.value = '';
+    renderReport();
+    showFlash('Issue reported. Manager/admin should review.', 'success');
+  }
+
+  document.getElementById('reportServiceDue').addEventListener('click', function (e) { reportIssue('service_due', e.currentTarget); });
+  document.getElementById('reportDamaged').addEventListener('click', function (e) { reportIssue('damaged', e.currentTarget); });
+
   // ---------- Recent jobs (history) ----------
   // The driver's own completed/cancelled jobs. The vehicle name only
   // appears when RLS still allows reading that vehicle (their default
@@ -457,6 +517,7 @@ function initDriverPage(ctx) {
   loadOwnVehicle();
   loadJobs();
   loadRecent();
+  loadReportVehicle();
 
   // Live notifications: toast + badge when a new request this driver can
   // take is created. Refreshes the inbox so Accept is immediately usable.

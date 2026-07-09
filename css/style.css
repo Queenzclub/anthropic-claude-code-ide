@@ -193,6 +193,32 @@ code {
   gap: 0 1rem;
 }
 
+/* ---------- Vehicle service controls (Stage 3A) ---------- */
+.input-block,
+.svc-control select {
+  width: 100%;
+  min-height: 46px;
+  padding: 0.6rem 0.9rem;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text);
+  font-size: 1rem;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.input-block:focus,
+.svc-control select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(79, 140, 255, 0.25);
+}
+
+.svc-control { display: flex; gap: 0.5rem; margin-top: 0.65rem; }
+.svc-control select { flex: 1; }
+.report-btns { display: flex; flex-direction: column; gap: 0.55rem; margin: 0.65rem 0 0.4rem; }
+
 .form-grid .full { grid-column: 1 / -1; }
 
 @media (max-width: 640px) {

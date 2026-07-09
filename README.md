@@ -137,16 +137,34 @@ soft warning is shown; nothing is blocked.
 
 ## Vehicle service status
 
-Beyond the automatic **available / busy / offline** states, an admin can
-flag a vehicle's service condition from the Vehicles section:
-**maintenance**, **service due**, **in service**, or **damaged**. The
-job→vehicle sync trigger never overwrites these manual states, so a flag
-is not lost when the van takes a job. **Maintenance, in service, and
-damaged** vehicles are hidden from the manager's dispatch (assign)
-picker; **service due** is advisory only — the vehicle stays dispatchable
-and is shown with an amber badge (and a "service due" note in the
-picker). The manager Vehicle Status overview badges and counts every
-state.
+Beyond the automatic **available / busy / offline** states, a vehicle can
+be flagged with a service condition: **maintenance**, **service due**,
+**in service**, or **damaged**. The job→vehicle sync trigger never
+overwrites these manual states, so a flag is not lost when the van takes
+a job. **Maintenance, in service, and damaged** vehicles are hidden from
+the manager's dispatch (assign) picker; **service due** is advisory only
+— the vehicle stays dispatchable and is shown with an amber badge (and a
+"service due" note in the picker). The manager Vehicle Status overview
+badges and counts every state.
+
+**Who can change it** (company-scoped throughout — no one can touch
+another company's vehicles):
+
+- **Company admin** and **manager** can set any of the six states. The
+  admin uses the Vehicles section; the manager has a status control on
+  each Vehicle Status card. Taking a *busy* vehicle out of service asks
+  for confirmation first.
+- **Drivers** can only *report a problem* on their own linked vehicle
+  from the driver dashboard — **Mark Service Due** or **Report Damaged /
+  Problem**, with an optional short note (e.g. "Tyre issue"). A driver
+  cannot set available/offline/maintenance/in service, cannot touch
+  another vehicle, and cannot clear a reported issue — only a
+  manager/admin can. These limits are enforced by RLS and a database
+  guard trigger, not just the UI. Outlet users have no service controls
+  at all.
+
+The latest reported note shows on the manager and admin vehicle cards;
+returning a vehicle to **available/offline** clears it.
 
 ## Dispatch selection
 

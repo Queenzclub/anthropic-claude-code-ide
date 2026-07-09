@@ -64,6 +64,20 @@
         <button id="locToggle" class="btn btn-primary btn-block" type="button">Share Location</button>
       </section>
 
+      <section class="panel" style="margin-top: 1.75rem;">
+        <h3>🛠️ Report Vehicle Issue</h3>
+        <p class="muted small" id="reportVehicle">Checking your vehicle…</p>
+        <div id="reportControls" class="hidden">
+          <input id="reportNote" class="input-block" type="text" maxlength="120"
+                 placeholder="Optional note — e.g. Tyre issue, Engine warning">
+          <div class="report-btns">
+            <button id="reportServiceDue" class="btn btn-outline btn-block" type="button">Mark Service Due</button>
+            <button id="reportDamaged" class="btn btn-danger btn-block" type="button">Report Damaged / Problem</button>
+          </div>
+          <p class="muted small">Only a manager or admin can clear a reported issue.</p>
+        </div>
+      </section>
+
       <section style="margin-top: 1.75rem;">
         <div class="section-head">
           <h3>🗂️ Recent Jobs</h3>
