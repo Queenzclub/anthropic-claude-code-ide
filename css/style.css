@@ -219,6 +219,10 @@ code {
 .svc-control select { flex: 1; }
 .report-btns { display: flex; flex-direction: column; gap: 0.55rem; margin: 0.65rem 0 0.4rem; }
 
+/* ---------- KM / odometer entry (Stage 3B) ---------- */
+.km-field { margin: 0.6rem 0 0.5rem; }
+.km-field label { display: block; font-size: 0.82rem; font-weight: 600; color: var(--muted); margin: 0 0 0.3rem; }
+
 .form-grid .full { grid-column: 1 / -1; }
 
 @media (max-width: 640px) {

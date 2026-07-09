@@ -241,7 +241,7 @@ function initDriverPage(ctx) {
   async function loadJobs() {
     var res = await window.sb
       .from('vehicle_requests')
-      .select('id, status, vehicle_id, pickup_location, dropoff_location, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, customer_name, customer_contact, notes, created_at, accepted_at, started_at, completed_at, outlets(name), vehicles!vehicle_id(vehicle_name, plate_number, last_lat, last_lng, last_updated)')
+      .select('id, status, vehicle_id, start_km, end_km, pickup_location, dropoff_location, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, customer_name, customer_contact, notes, created_at, accepted_at, started_at, completed_at, outlets(name), vehicles!vehicle_id(vehicle_name, plate_number, last_lat, last_lng, last_updated, current_km)')
       .eq('driver_id', profile.driver_id)
       .in('status', ['accepted', 'in_progress'])
       .order('created_at', { ascending: true });
@@ -281,9 +281,11 @@ function initDriverPage(ctx) {
 
       var actions = '';
       if (r.status === 'accepted') {
-        actions = '<button class="btn btn-primary btn-block" type="button" data-action="start">Start Trip</button>';
+        actions = kmBlockHtml(r) +
+          '<button class="btn btn-primary btn-block" type="button" data-action="start">Start Trip</button>';
       } else if (r.status === 'in_progress') {
-        actions = '<button class="btn btn-success btn-block" type="button" data-action="complete">Complete Job</button>';
+        actions = kmBlockHtml(r) +
+          '<button class="btn btn-success btn-block" type="button" data-action="complete">Complete Job</button>';
       }
 
       var outletName = r.outlets && r.outlets.name;
@@ -304,14 +306,46 @@ function initDriverPage(ctx) {
     });
   }
 
-  // Moves a job to the next status. The guards in .eq() make the update
-  // a no-op if the job changed meanwhile (cancelled, reassigned, done) —
-  // and RLS + database triggers enforce the same rules server-side.
-  async function setStatus(id, fromStatus, toStatus, successMsg, errorMsg, btn) {
+  // Odometer entry on the job card: a Start KM input while accepted, an
+  // End KM input while in progress. Both optional — the trip still
+  // starts/completes with no KM. The server (Migration 19) is the source
+  // of truth for the rules; this just keeps entry easy and fast.
+  function kmBlockHtml(r) {
+    if (r.status === 'accepted') {
+      var cur = (r.vehicles && r.vehicles.current_km != null)
+        ? ' · current ' + escapeHtml(r.vehicles.current_km) : '';
+      return '<div class="km-field"><label>Start KM (optional' + cur + ')</label>' +
+        '<input class="input-block" type="number" min="0" inputmode="numeric" id="startkm-' + escapeHtml(r.id) + '"' +
+        (r.start_km != null ? ' value="' + escapeHtml(r.start_km) + '"' : '') +
+        ' placeholder="Odometer at start"></div>';
+    }
+    if (r.status === 'in_progress') {
+      var startLine = r.start_km != null ? '<div class="meta">🧭 Start KM: ' + escapeHtml(r.start_km) + '</div>' : '';
+      return startLine + '<div class="km-field"><label>End KM (optional)</label>' +
+        '<input class="input-block" type="number" min="0" inputmode="numeric" id="endkm-' + escapeHtml(r.id) + '"' +
+        (r.end_km != null ? ' value="' + escapeHtml(r.end_km) + '"' : '') +
+        ' placeholder="Odometer at finish"></div>';
+    }
+    return '';
+  }
+
+  // Reads a KM input: null when blank, or a validated non-negative number.
+  function readKm(inputId) {
+    var el = document.getElementById(inputId);
+    if (!el || el.value.trim() === '') return { ok: true, value: null };
+    var n = Number(el.value);
+    if (!isFinite(n) || n < 0) return { ok: false, error: 'Please enter a valid KM (0 or more).' };
+    return { ok: true, value: n };
+  }
+
+  // Moves a job to the next status, optionally writing KM columns in the
+  // same update. The guards in .eq() make it a no-op if the job changed
+  // meanwhile, and RLS + database triggers enforce the rules server-side.
+  async function setStatus(id, fromStatus, toStatus, successMsg, errorMsg, btn, extraCols) {
     btn.disabled = true;
     var res = await window.sb
       .from('vehicle_requests')
-      .update({ status: toStatus })
+      .update(Object.assign({ status: toStatus }, extraCols || {}))
       .eq('id', id)
       .eq('driver_id', profile.driver_id)
       .eq('status', fromStatus)
@@ -319,7 +353,9 @@ function initDriverPage(ctx) {
 
     if (res.error) {
       btn.disabled = false;
-      showFlash(errorMsg, 'error');
+      var m = (res.error.message || '');
+      // Surface the specific KM validation message; otherwise stay generic.
+      showFlash(/km/i.test(m) ? m : errorMsg, 'error');
       return;
     }
     if (!res.data || !res.data.length) {
@@ -340,11 +376,22 @@ function initDriverPage(ctx) {
     var action = btn.getAttribute('data-action');
 
     if (action === 'start') {
+      var sk = readKm('startkm-' + id);
+      if (!sk.ok) { showFlash(sk.error, 'error'); return; }
       setStatus(id, 'accepted', 'in_progress',
-        'Trip started', 'Could not start trip. Please try again.', btn);
+        'Trip started', 'Could not start trip. Please try again.', btn,
+        sk.value != null ? { start_km: sk.value } : null);
     } else if (action === 'complete') {
+      var ek = readKm('endkm-' + id);
+      if (!ek.ok) { showFlash(ek.error, 'error'); return; }
+      var job = activeJobs.filter(function (j) { return j.id === id; })[0];
+      if (ek.value != null && job && job.start_km != null && ek.value < job.start_km) {
+        showFlash('End KM cannot be less than Start KM (' + job.start_km + ').', 'error');
+        return;
+      }
       setStatus(id, 'in_progress', 'completed',
-        'Job completed', 'Could not complete job. Please try again.', btn);
+        'Job completed', 'Could not complete job. Please try again.', btn,
+        ek.value != null ? { end_km: ek.value } : null);
     } else if (action === 'fullmap') {
       var job = activeJobs.filter(function (j) { return j.id === id; })[0];
       if (job) openFullMap(job, job.vehicles);
@@ -537,7 +584,7 @@ function initDriverPage(ctx) {
   async function loadRecent() {
     var res = await window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, completed_at, cancelled_at, vehicles!vehicle_id(vehicle_name, plate_number)')
+      .select('id, status, start_km, end_km, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, completed_at, cancelled_at, vehicles!vehicle_id(vehicle_name, plate_number)')
       .eq('driver_id', profile.driver_id)
       .in('status', ['completed', 'cancelled'])
       .order('updated_at', { ascending: false })
@@ -561,6 +608,7 @@ function initDriverPage(ctx) {
         ? '✅ Completed ' + fmtTime(r.completed_at)
         : (r.cancelled_at ? '🚫 Cancelled ' + fmtTime(r.cancelled_at) : '');
       if (closed) extra += '<div class="meta">' + escapeHtml(closed) + '</div>';
+      extra += kmSummaryHtml(r);
       return requestCardHtml(r, { extraHtml: extra });
     }).join('');
   }

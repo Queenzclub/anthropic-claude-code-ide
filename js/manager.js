@@ -155,10 +155,11 @@ function initManagerPage(ctx) {
     }).join('');
   }
 
+  var activeById = {};
   async function loadActive() {
     var res = await window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, created_at, accepted_at, started_at, driver_id, vehicle_id, outlets(name), drivers!driver_id(name), vehicles!vehicle_id(vehicle_name, plate_number)')
+      .select('id, status, start_km, end_km, pickup_location, dropoff_location, customer_name, customer_contact, created_at, accepted_at, started_at, driver_id, vehicle_id, outlets(name), drivers!driver_id(name), vehicles!vehicle_id(vehicle_name, plate_number)')
       .in('status', ['accepted', 'in_progress'])
       .order('created_at', { ascending: true });
 
@@ -168,7 +169,9 @@ function initManagerPage(ctx) {
     }
 
     jobCounts = { driver: {}, vehicle: {} };
+    activeById = {};
     res.data.forEach(function (r) {
+      activeById[r.id] = r;
       if (r.driver_id) jobCounts.driver[r.driver_id] = (jobCounts.driver[r.driver_id] || 0) + 1;
       if (r.vehicle_id) jobCounts.vehicle[r.vehicle_id] = (jobCounts.vehicle[r.vehicle_id] || 0) + 1;
     });
@@ -188,10 +191,64 @@ function initManagerPage(ctx) {
       }
       return requestCardHtml(r, {
         topLine: originLine(r),
-        extraHtml: chips + timesHtml(r),
+        extraHtml: chips + timesHtml(r) + kmSummaryHtml(r),
+        actionsHtml: '<button class="btn btn-outline btn-small" type="button" data-action="editkm">Edit KM</button>',
       });
     }).join('');
   }
+
+  // Manager KM correction on an active job (staff RLS allows it; the
+  // Migration-19 validation trigger still enforces non-negative / ordering).
+  function openKmPanel(card, r) {
+    activeEl.querySelectorAll('[data-panel]').forEach(function (p) { p.remove(); });
+    card.insertAdjacentHTML('beforeend',
+      '<div class="inline-panel" data-panel><div class="form-grid">' +
+        '<div class="field"><label>Start KM</label><input data-role="km-start" type="number" min="0" inputmode="numeric" value="' +
+          (r.start_km != null ? escapeHtml(r.start_km) : '') + '"></div>' +
+        '<div class="field"><label>End KM</label><input data-role="km-end" type="number" min="0" inputmode="numeric" value="' +
+          (r.end_km != null ? escapeHtml(r.end_km) : '') + '"></div>' +
+      '</div><div class="request-actions">' +
+        '<button class="btn btn-primary" type="button" data-action="save-km">Save KM</button>' +
+        '<button class="btn btn-outline" type="button" data-action="close-panel">Back</button>' +
+      '</div></div>');
+  }
+
+  function readNum(el) {
+    if (!el || el.value.trim() === '') return null;
+    var n = Number(el.value);
+    return (isFinite(n) && n >= 0) ? n : NaN;
+  }
+
+  async function saveKm(id, card, btn) {
+    var s = readNum(card.querySelector('[data-role="km-start"]'));
+    var e = readNum(card.querySelector('[data-role="km-end"]'));
+    if ((typeof s === 'number' && isNaN(s)) || (typeof e === 'number' && isNaN(e))) {
+      showFlash('Please enter valid KM (0 or more).', 'error'); return;
+    }
+    if (s != null && e != null && e < s) { showFlash('End KM cannot be less than Start KM.', 'error'); return; }
+    btn.disabled = true;
+    var res = await window.sb.from('vehicle_requests')
+      .update({ start_km: s, end_km: e }).eq('id', id).select('id');
+    if (res.error || !res.data || !res.data.length) {
+      btn.disabled = false;
+      var m = (res.error && res.error.message) || '';
+      showFlash(/km/i.test(m) ? m : 'Could not save KM. Please try again.', 'error');
+      return;
+    }
+    showFlash('KM updated.', 'success');
+    loadActive();
+  }
+
+  activeEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    var card = btn.closest('.request-card');
+    var id = card.getAttribute('data-id');
+    var action = btn.getAttribute('data-action');
+    if (action === 'editkm') openKmPanel(card, activeById[id] || {});
+    else if (action === 'save-km') saveKm(id, card, btn);
+    else if (action === 'close-panel') activeEl.querySelectorAll('[data-panel]').forEach(function (p) { p.remove(); });
+  });
 
   function loadAll() { loadPending(); loadActive(); loadVehicles(); loadSummary(); loadHistory(); }
 
@@ -257,7 +314,7 @@ function initManagerPage(ctx) {
 
     var q = window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, cancellation_reason, created_at, accepted_at, started_at, completed_at, cancelled_at, driver_id, vehicle_id, outlets(name), drivers!driver_id(name), vehicles!vehicle_id(vehicle_name, plate_number)')
+      .select('id, status, start_km, end_km, pickup_location, dropoff_location, customer_name, customer_contact, notes, cancellation_reason, created_at, accepted_at, started_at, completed_at, cancelled_at, driver_id, vehicle_id, outlets(name), drivers!driver_id(name), vehicles!vehicle_id(vehicle_name, plate_number)')
       .in('status', statuses);
     var start = rangeStartIso(historyFilter.range);
     if (start) q = q.gte('updated_at', start);
@@ -283,7 +340,7 @@ function initManagerPage(ctx) {
       if (r.cancellation_reason) {
         extra += '<div class="meta">💬 Reason: ' + escapeHtml(r.cancellation_reason) + '</div>';
       }
-      extra += timesHtml(r);
+      extra += timesHtml(r) + kmSummaryHtml(r);
       return requestCardHtml(r, {
         topLine: originLine(r),
         extraHtml: extra,
@@ -332,6 +389,9 @@ function initManagerPage(ctx) {
     var note = v.service_note
       ? '<div class="meta">📝 Reported: ' + escapeHtml(v.service_note) + '</div>'
       : '';
+    var km = v.current_km != null
+      ? '<div class="meta">🧭 Odometer: ' + escapeHtml(v.current_km) + ' km</div>'
+      : '';
     var control = '<div class="svc-control">' +
       '<select data-role="svc-status" aria-label="Service status">' + svcStatusOptions(v.status, jobs > 0) + '</select>' +
       '<button class="btn btn-outline btn-small" type="button" data-action="set-status">Update</button>' +
@@ -342,7 +402,7 @@ function initManagerPage(ctx) {
       '<div class="meta">🔖 ' + escapeHtml(v.plate_number) + '</div>' +
       '<div class="meta">👤 ' + (v.drivers ? escapeHtml(v.drivers.name) : 'No driver assigned') + '</div>' +
       '<div class="meta">🕐 ' + (v.last_updated ? 'Updated ' + escapeHtml(fmtTime(v.last_updated)) : 'No location yet') + '</div>' +
-      note +
+      km + note +
       '<span class="chip fresh-' + fresh.cls + '">' + escapeHtml(fresh.label) + '</span>' + duty + jobsChip +
       control +
     '</div>';
@@ -430,7 +490,7 @@ function initManagerPage(ctx) {
   async function loadVehicles() {
     var res = await window.sb
       .from('vehicles')
-      .select('id, vehicle_name, plate_number, status, service_note, last_lat, last_lng, last_updated, drivers(name, on_duty)')
+      .select('id, vehicle_name, plate_number, status, service_note, current_km, last_lat, last_lng, last_updated, drivers(name, on_duty)')
       .eq('active', true)
       .order('vehicle_name', { ascending: true });
 
