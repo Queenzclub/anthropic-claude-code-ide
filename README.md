@@ -110,6 +110,19 @@ subscription plus a server or Supabase Edge Function that sends the
 push. That is a deliberate later step; today, alerts require the app to
 be open in the background.
 
+## Driver navigation map
+
+When a request carries pickup/drop-off map pins (set optionally on the
+outlet or manager request form), the driver sees them on each job card:
+a compact map with a green **P**ickup and red **D**rop-off marker, and
+buttons that hand off to the phone's map app — **Open Pickup in Maps**,
+**Open Drop-off in Maps**, and **Open Route in Maps** when both pins
+exist. **View Full Map** opens a full-screen view with pickup, drop-off
+and the driver's own vehicle position. Requests without pins show the
+text locations and a "No map pin added" note — never a broken map. The
+app never does turn-by-turn itself; navigation always opens Google/Apple
+Maps. Each job in a multi-job queue keeps its own separate pins.
+
 ## Multi-job queues
 
 One driver (and their vehicle) can carry **several active deliveries at

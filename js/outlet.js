@@ -25,6 +25,13 @@ function initOutletPage(ctx) {
   var dispatchList = [];
   var sendToEl = document.getElementById('sendTo');
 
+  // Optional pickup/drop-off pins for driver navigation (Stage 2C).
+  var outPicker = createPinPicker('outPinMap', 'outPinStatus');
+  var outPinPickup = document.getElementById('outPinPickupBtn');
+  var outPinDropoff = document.getElementById('outPinDropoffBtn');
+  if (outPinPickup) outPinPickup.addEventListener('click', function () { outPicker.arm('pickup'); });
+  if (outPinDropoff) outPinDropoff.addEventListener('click', function () { outPicker.arm('dropoff'); });
+
   async function loadDispatchList() {
     if (!sendToEl || !window.sb.rpc) return;
     var res = await window.sb.rpc('dispatchable_drivers');
@@ -249,6 +256,7 @@ function initOutletPage(ctx) {
         if (dispatchList[i].driver_id === targetId) { target = dispatchList[i]; break; }
       }
     }
+    var pins = outPicker.get();
     var row = {
       company_id: profile.company_id,
       outlet_id: profile.outlet_id,
@@ -260,6 +268,10 @@ function initOutletPage(ctx) {
       customer_name: val('customerName') || null,
       customer_contact: val('customerContact') || null,
       notes: val('notes') || null,
+      pickup_lat: pins.pickup ? pins.pickup.lat : null,
+      pickup_lng: pins.pickup ? pins.pickup.lng : null,
+      dropoff_lat: pins.dropoff ? pins.dropoff.lat : null,
+      dropoff_lng: pins.dropoff ? pins.dropoff.lng : null,
     };
     if (target) {
       row.target_driver_id = target.driver_id;
@@ -274,6 +286,8 @@ function initOutletPage(ctx) {
     }
 
     form.reset();
+    outPicker.reset();
+    document.getElementById('outPinMap').classList.add('hidden');
     document.getElementById('requestFormHost').classList.add('hidden');
     showFlash(target
       ? 'Request sent to ' + target.driver_name + '.'
@@ -292,6 +306,8 @@ function initOutletPage(ctx) {
   });
   document.getElementById('cancelRequestBtn').addEventListener('click', function () {
     form.reset();
+    outPicker.reset();
+    document.getElementById('outPinMap').classList.add('hidden');
     formHost.classList.add('hidden');
   });
 

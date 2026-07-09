@@ -32,7 +32,7 @@ function initManagerPage(ctx) {
   var dispatchList = [];
   var mSendTo = document.getElementById('mSendTo');
   var createHost = document.getElementById('createFormHost');
-  var pins = { pickup: null, dropoff: null, mode: null, map: null, markers: {} };
+  var picker = createPinPicker('pinMap', 'pinStatus');
 
   async function loadDispatchList() {
     if (!mSendTo || !window.sb.rpc) return;
@@ -52,53 +52,12 @@ function initManagerPage(ctx) {
     mSendTo.value = current || '';
   }
 
-  function renderPinStatus() {
-    var parts = [];
-    if (pins.pickup) parts.push('📍 pickup pinned');
-    if (pins.dropoff) parts.push('🏁 drop-off pinned');
-    if (pins.mode) parts.push('tap the map to place the ' + pins.mode + ' pin');
-    document.getElementById('pinStatus').textContent = parts.join(' · ');
-  }
-
-  function ensurePinMap() {
-    var el = document.getElementById('pinMap');
-    el.classList.remove('hidden');
-    if (pins.map || !window.L) return;
-    pins.map = L.map('pinMap');
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
-    }).addTo(pins.map);
-    pins.map.setView([3.139, 101.6869], 12);
-    pins.map.on('click', function (e) {
-      if (!pins.mode) return;
-      var kind = pins.mode;
-      pins[kind] = { lat: e.latlng.lat, lng: e.latlng.lng };
-      if (pins.markers[kind]) pins.markers[kind].setLatLng(e.latlng);
-      else pins.markers[kind] = L.marker(e.latlng).addTo(pins.map)
-        .bindPopup(kind === 'pickup' ? '📍 Pickup' : '🏁 Drop-off');
-      pins.mode = null;
-      renderPinStatus();
-    });
-    setTimeout(function () { pins.map.invalidateSize(); }, 50);
-  }
-
-  function armPin(kind) {
-    ensurePinMap();
-    pins.mode = kind;
-    renderPinStatus();
-    if (pins.map) setTimeout(function () { pins.map.invalidateSize(); }, 50);
-  }
+  function armPin(kind) { picker.arm(kind); }
 
   function resetCreateForm() {
     document.getElementById('createForm').reset();
-    pins.pickup = null;
-    pins.dropoff = null;
-    pins.mode = null;
-    Object.keys(pins.markers).forEach(function (k) {
-      if (pins.map) pins.map.removeLayer(pins.markers[k]);
-    });
-    pins.markers = {};
-    renderPinStatus();
+    picker.reset();
+    document.getElementById('pinMap').classList.add('hidden');
   }
 
   async function submitCreate(e) {
@@ -116,6 +75,7 @@ function initManagerPage(ctx) {
     for (var i = 0; i < dispatchList.length; i++) {
       if (dispatchList[i].driver_id === targetId) { target = dispatchList[i]; break; }
     }
+    var mPins = picker.get();
     var row = {
       company_id: ctx.profile.company_id,
       outlet_id: null,
@@ -127,10 +87,10 @@ function initManagerPage(ctx) {
       customer_name: document.getElementById('mCustomerName').value.trim() || null,
       customer_contact: document.getElementById('mCustomerContact').value.trim() || null,
       notes: document.getElementById('mNotes').value.trim() || null,
-      pickup_lat: pins.pickup ? pins.pickup.lat : null,
-      pickup_lng: pins.pickup ? pins.pickup.lng : null,
-      dropoff_lat: pins.dropoff ? pins.dropoff.lat : null,
-      dropoff_lng: pins.dropoff ? pins.dropoff.lng : null,
+      pickup_lat: mPins.pickup ? mPins.pickup.lat : null,
+      pickup_lng: mPins.pickup ? mPins.pickup.lng : null,
+      dropoff_lat: mPins.dropoff ? mPins.dropoff.lat : null,
+      dropoff_lng: mPins.dropoff ? mPins.dropoff.lng : null,
     };
     if (target) {
       row.target_driver_id = target.driver_id;
