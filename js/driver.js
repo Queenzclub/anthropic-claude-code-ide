@@ -13,6 +13,25 @@ function initDriverPage(ctx) {
   var activeJobs = [];
   var onDuty = false;
   var ownVehicleId = profile.vehicle_id || null;
+  // The driver's linked vehicle row (id/name/plate/status/active/note),
+  // resolved by loadReportVehicle. Drives the duty gate, the accept block,
+  // and the issue-report controls. null = no usable linked vehicle.
+  var linkedVehicle = null;
+
+  // Vehicle states that mean an open issue (report is blocked) and that
+  // take the vehicle out of driver self-accept.
+  var VEHICLE_ISSUE_STATES = ['service_due', 'damaged', 'maintenance', 'in_service'];
+  // Why the driver can't take a new job right now (null = no vehicle block;
+  // off-duty is messaged separately by the empty state).
+  function acceptBlockReason() {
+    if (!linkedVehicle) return 'No vehicle is linked to you — you cannot accept jobs. Please contact your manager/admin.';
+    if (linkedVehicle.active === false) return 'Your linked vehicle is inactive. Please contact your manager/admin.';
+    if (VEHICLE_ISSUE_STATES.indexOf(linkedVehicle.status) !== -1 || linkedVehicle.status === 'offline') {
+      return 'Your vehicle has an open issue (' + (STATUS_LABELS[linkedVehicle.status] || linkedVehicle.status) +
+        '). You cannot accept new jobs until a manager/admin clears it.';
+    }
+    return null;
+  }
 
   if (!profile.driver_id) {
     jobsEl.innerHTML = '<div class="empty-state">Your account is not linked to a driver record yet. Please contact your admin.</div>';
@@ -34,6 +53,13 @@ function initDriverPage(ctx) {
     dutyToggle.textContent = onDuty ? 'Go Off Duty' : 'Go On Duty';
     dutyToggle.classList.toggle('btn-primary', !onDuty);
     dutyToggle.classList.toggle('btn-outline', onDuty);
+    // A driver needs a linked vehicle to go on duty (also enforced by RLS
+    // + a DB trigger). Going OFF duty is always allowed.
+    if (!onDuty && !linkedVehicle) {
+      dutyHint.textContent = 'Vehicle not linked. Please contact your manager/admin before going on duty.';
+      dutyToggle.disabled = true;
+      return;
+    }
     dutyHint.textContent = onDuty
       ? 'You receive open requests and share your location while on duty.'
       : 'Go on duty to receive open delivery requests.';
@@ -48,8 +74,12 @@ function initDriverPage(ctx) {
   }
 
   async function toggleDuty() {
-    dutyToggle.disabled = true;
     var next = !onDuty;
+    if (next && !linkedVehicle) {
+      showFlash('Vehicle not linked. Please contact your manager/admin before going on duty.', 'error');
+      return;
+    }
+    dutyToggle.disabled = true;
     var res = await window.sb.from('drivers')
       .update({ on_duty: next, on_duty_since: new Date().toISOString() })
       .eq('id', profile.driver_id)
@@ -91,7 +121,18 @@ function initDriverPage(ctx) {
     else availBadge.classList.add('hidden');
   }
 
+  // A prominent banner explaining why accepting is blocked (vehicle issue
+  // or no vehicle). Off-duty is explained by the empty state instead.
+  function renderAcceptBlock() {
+    var el = document.getElementById('acceptBlock');
+    if (!el) return;
+    var reason = onDuty ? acceptBlockReason() : null;
+    if (reason) { el.textContent = reason; el.classList.remove('hidden'); }
+    else el.classList.add('hidden');
+  }
+
   async function loadAvailable() {
+    renderAcceptBlock();
     var res = await window.sb
       .from('vehicle_requests')
       .select('id, status, dispatch_mode, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, outlets(name)')
@@ -107,7 +148,7 @@ function initDriverPage(ctx) {
     if (!res.data.length) {
       availableEl.innerHTML = '<div class="empty-state">' + (onDuty
         ? 'No available requests right now.'
-        : 'You are off duty. Only requests assigned directly to you appear here.') + '</div>';
+        : 'You are off duty. Go on duty to receive and accept requests.') + '</div>';
       return;
     }
     availableEl.innerHTML = res.data.map(function (r) {
@@ -127,6 +168,10 @@ function initDriverPage(ctx) {
   }
 
   async function acceptJob(id, btn) {
+    // Belt-and-suspenders: RLS already blocks these, but keep the UI honest.
+    if (!onDuty) { showFlash('Go on duty to accept jobs.', 'error'); return; }
+    var reason = acceptBlockReason();
+    if (reason) { showFlash(reason, 'error'); loadAvailable(); return; }
     btn.disabled = true;
     // Only claim the job for this driver. The database assigns the
     // driver's vehicle automatically (so the outlet can track it) — the
@@ -415,55 +460,68 @@ function initDriverPage(ctx) {
   // Damaged (optionally with a short note). RLS plus a database guard
   // trigger enforce this: no other vehicle, no other status, and a driver
   // can never clear a reported issue — only a manager/admin can.
-  var reportedVehicle = null;
   var reportVehicleEl = document.getElementById('reportVehicle');
   var reportControls = document.getElementById('reportControls');
   var reportNote = document.getElementById('reportNote');
+  var reportServiceDueBtn = document.getElementById('reportServiceDue');
+  var reportDamagedBtn = document.getElementById('reportDamaged');
+  var reportIssueMsg = document.getElementById('reportIssueMsg');
 
   function renderReport() {
-    if (!reportedVehicle) {
+    if (!linkedVehicle) {
       reportVehicleEl.textContent = 'No vehicle is linked to you yet. Ask your manager to link one.';
       reportControls.classList.add('hidden');
       return;
     }
-    var v = reportedVehicle;
+    var v = linkedVehicle;
     reportVehicleEl.innerHTML = '🚐 ' + escapeHtml(v.vehicle_name) + ' · ' + escapeHtml(v.plate_number) +
       ' — ' + statusBadge(v.status);
     if (v.service_note) {
       reportVehicleEl.innerHTML += '<br><span class="muted">📝 ' + escapeHtml(v.service_note) + '</span>';
     }
     reportControls.classList.remove('hidden');
+    // Already flagged: one open issue at a time — disable until cleared.
+    var flagged = VEHICLE_ISSUE_STATES.indexOf(v.status) !== -1;
+    reportServiceDueBtn.disabled = flagged;
+    reportDamagedBtn.disabled = flagged;
+    reportIssueMsg.classList.toggle('hidden', !flagged);
   }
 
   async function loadReportVehicle() {
     await loadOwnVehicle();
-    var q = window.sb.from('vehicles').select('id, vehicle_name, plate_number, status, service_note');
+    var q = window.sb.from('vehicles').select('id, vehicle_name, plate_number, status, service_note, active');
     q = ownVehicleId ? q.eq('id', ownVehicleId) : q.eq('driver_id', profile.driver_id);
     var res = await q.limit(1);
-    reportedVehicle = (!res.error && res.data && res.data.length) ? res.data[0] : null;
-    if (reportedVehicle && !ownVehicleId) ownVehicleId = reportedVehicle.id;
+    linkedVehicle = (!res.error && res.data && res.data.length) ? res.data[0] : null;
+    if (linkedVehicle && !ownVehicleId) ownVehicleId = linkedVehicle.id;
     renderReport();
+    // The linked vehicle drives the duty gate and the accept block too.
+    renderDuty();
+    loadAvailable();
   }
 
   async function reportIssue(newStatus, btn) {
-    if (!reportedVehicle) return;
+    if (!linkedVehicle) return;
     btn.disabled = true;
     var note = (reportNote.value || '').trim();
     var upd = { status: newStatus };
     if (note) upd.service_note = note;
     var res = await window.sb.from('vehicles')
       .update(upd)
-      .eq('id', reportedVehicle.id)
+      .eq('id', linkedVehicle.id)
       .select('id, status, service_note');
     btn.disabled = false;
     if (res.error || !res.data || !res.data.length) {
       showFlash('Could not report the issue. Please try again.', 'error');
       return;
     }
-    reportedVehicle.status = res.data[0].status;
-    reportedVehicle.service_note = res.data[0].service_note;
+    linkedVehicle.status = res.data[0].status;
+    linkedVehicle.service_note = res.data[0].service_note;
     reportNote.value = '';
     renderReport();
+    // Reporting takes the vehicle out of dispatch — refresh the inbox/gate.
+    renderDuty();
+    loadAvailable();
     showFlash('Issue reported. Manager/admin should review.', 'success');
   }
 

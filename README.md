@@ -184,15 +184,27 @@ path.
 
 ## Driver duty status
 
-Drivers go **On Duty / Off Duty** from their dashboard. Open requests
-are only visible to on-duty drivers — enforced by row-level security,
-not just the UI — while requests targeted at a specific driver stay
-visible regardless. Going on duty starts location sharing (with the
-driver's permission) so idle on-duty vans appear on the manager map;
-going off duty stops it. Existing drivers were set on duty when the
-feature shipped; newly created drivers start off duty. As everywhere
-else in the app, location only flows while the driver keeps the app
-open — duty status does not enable background tracking.
+Drivers go **On Duty / Off Duty** from their dashboard. Going on duty
+starts location sharing (with the driver's permission) so idle on-duty
+vans appear on the manager map; going off duty stops it. Existing
+drivers were set on duty when the feature shipped; newly created drivers
+start off duty. As everywhere else in the app, location only flows while
+the driver keeps the app open — duty status does not enable background
+tracking.
+
+**Self-accept guardrails (enforced by RLS, not just the UI).** A driver
+can see and accept a pending request only when **all** hold: they are
+**on duty**, they have a **linked vehicle**, and that vehicle is
+**active** with a **dispatchable** status (`available` or `busy`). This
+applies to *both* open and targeted requests — off duty means no
+self-accept at all (managers/admins can still assign). A driver also
+**cannot go on duty without a linked vehicle**. Any not-dispatchable
+state — `offline`, `maintenance`, `in_service`, `damaged`, or
+`service_due` — blocks new self-accepts; in particular a driver-reported
+issue immediately stops that van taking more jobs, while its existing
+accepted/in-progress jobs continue and can be completed. Once flagged, a
+vehicle can't be re-reported until a manager/admin clears it back to a
+dispatchable status.
 
 ## Live maps
 

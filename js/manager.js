@@ -304,9 +304,13 @@ function initManagerPage(ctx) {
   // The six states a manager can set directly. 'busy' is machine-driven,
   // so it is only offered when the vehicle is currently busy (to keep the
   // select showing its real value).
-  function svcStatusOptions(current) {
+  function svcStatusOptions(current, hasJobs) {
     var opts = ['available', 'offline', 'maintenance', 'service_due', 'in_service', 'damaged'];
-    if (current === 'busy') opts.unshift('busy');
+    // 'busy' is machine-driven, but offer it when the vehicle is busy or
+    // still carrying jobs so a manager can clear an issue back to a
+    // dispatchable state mid-flight ('available' is blocked while a job
+    // is active).
+    if (current === 'busy' || hasJobs) opts.unshift('busy');
     return opts.map(function (s) {
       return '<option value="' + s + '"' + (s === current ? ' selected' : '') + '>' +
         escapeHtml(STATUS_LABELS[s] || s) + '</option>';
@@ -329,7 +333,7 @@ function initManagerPage(ctx) {
       ? '<div class="meta">📝 Reported: ' + escapeHtml(v.service_note) + '</div>'
       : '';
     var control = '<div class="svc-control">' +
-      '<select data-role="svc-status" aria-label="Service status">' + svcStatusOptions(v.status) + '</select>' +
+      '<select data-role="svc-status" aria-label="Service status">' + svcStatusOptions(v.status, jobs > 0) + '</select>' +
       '<button class="btn btn-outline btn-small" type="button" data-action="set-status">Update</button>' +
     '</div>';
     return '<div class="card" data-id="' + escapeHtml(v.id) + '">' +
@@ -356,8 +360,8 @@ function initManagerPage(ctx) {
     }
     btn.disabled = true;
     var upd = { status: newStatus };
-    // Returning a vehicle to service clears any reported issue note.
-    if (newStatus === 'available' || newStatus === 'offline') upd.service_note = null;
+    // Returning a vehicle to a dispatchable/idle state clears the issue note.
+    if (['available', 'offline', 'busy'].indexOf(newStatus) !== -1) upd.service_note = null;
     var res = await window.sb.from('vehicles').update(upd).eq('id', id).select('id');
     if (res.error || !res.data || !res.data.length) {
       btn.disabled = false;
