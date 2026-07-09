@@ -141,6 +141,9 @@ code {
 .badge-busy        { background: rgba(240, 160, 32, 0.16); color: #ffd08a; border: 1px solid rgba(240, 160, 32, 0.5); }
 .badge-offline     { background: rgba(146, 161, 192, 0.14); color: #b7c3dd; border: 1px solid rgba(146, 161, 192, 0.45); }
 .badge-maintenance { background: rgba(229, 72, 77, 0.14);  color: #ffb3b5; border: 1px solid rgba(229, 72, 77, 0.45); }
+.badge-service_due { background: rgba(240, 160, 32, 0.16); color: #ffd08a; border: 1px solid rgba(240, 160, 32, 0.5); }
+.badge-in_service  { background: rgba(79, 140, 255, 0.16); color: #9dbfff; border: 1px solid rgba(79, 140, 255, 0.45); }
+.badge-damaged     { background: rgba(229, 72, 77, 0.18);  color: #ffb3b5; border: 1px solid rgba(229, 72, 77, 0.55); }
 
 .badge-pending     { background: rgba(240, 160, 32, 0.16); color: #ffd08a; border: 1px solid rgba(240, 160, 32, 0.5); }
 .badge-accepted    { background: rgba(79, 140, 255, 0.18); color: #9dbfff; border: 1px solid rgba(79, 140, 255, 0.5); }

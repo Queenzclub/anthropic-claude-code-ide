@@ -135,6 +135,19 @@ completed or cancelled** — enforced in the database, not the UI. When a
 driver or manager stacks a job on someone with 3 or more active jobs, a
 soft warning is shown; nothing is blocked.
 
+## Vehicle service status
+
+Beyond the automatic **available / busy / offline** states, an admin can
+flag a vehicle's service condition from the Vehicles section:
+**maintenance**, **service due**, **in service**, or **damaged**. The
+job→vehicle sync trigger never overwrites these manual states, so a flag
+is not lost when the van takes a job. **Maintenance, in service, and
+damaged** vehicles are hidden from the manager's dispatch (assign)
+picker; **service due** is advisory only — the vehicle stays dispatchable
+and is shown with an amber badge (and a "service due" note in the
+picker). The manager Vehicle Status overview badges and counts every
+state.
+
 ## Dispatch selection
 
 Requests can go to **any available driver** (open dispatch, the
