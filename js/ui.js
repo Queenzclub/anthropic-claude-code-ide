@@ -63,6 +63,152 @@ function requestCardHtml(r, opts) {
   return html;
 }
 
+// ---------- Navigation / map-link helpers (Stage 2C) ----------
+// All navigation is handed off to the phone's map app via normal links —
+// the app never does turn-by-turn itself.
+function hasPin(lat, lng) {
+  return typeof lat === 'number' && typeof lng === 'number' && !isNaN(lat) && !isNaN(lng);
+}
+
+// A Google Maps link to a single point: coordinates if pinned, else a
+// text search on the typed location. null if we have neither.
+function mapsPointUrl(lat, lng, text) {
+  if (hasPin(lat, lng)) return 'https://www.google.com/maps/search/?api=1&query=' + lat + '%2C' + lng;
+  if (text) return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(text);
+  return null;
+}
+
+// A driving-route link (pickup -> drop-off). Only when BOTH are pinned.
+function mapsRouteUrl(pLat, pLng, dLat, dLng) {
+  if (!hasPin(pLat, pLng) || !hasPin(dLat, dLng)) return null;
+  return 'https://www.google.com/maps/dir/?api=1&origin=' + pLat + '%2C' + pLng +
+    '&destination=' + dLat + '%2C' + dLng + '&travelmode=driving';
+}
+
+// Distinct pickup (green P) vs drop-off (red D) markers.
+function pinIcon(kind) {
+  return L.divIcon({
+    className: 'route-pin route-pin-' + kind,
+    html: kind === 'pickup' ? 'P' : 'D',
+    iconSize: [26, 26], iconAnchor: [13, 13], popupAnchor: [0, -12],
+  });
+}
+
+function vanDivIcon() {
+  return L.divIcon({ className: 'van-marker', html: '🚐', iconSize: [34, 34], iconAnchor: [17, 17], popupAnchor: [0, -16] });
+}
+
+// Builds a Leaflet map into mapElId showing whichever of pickup / drop-off
+// pins exist (and optionally the driver's vehicle). Returns the map so the
+// caller can remove() it before re-render. opts.full enables zoom controls.
+function buildRouteMap(mapElId, job, opts) {
+  opts = opts || {};
+  if (!window.L || !document.getElementById(mapElId)) return null;
+  var map = L.map(mapElId, { attributionControl: false, zoomControl: !!opts.full });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+  var pts = [];
+  if (hasPin(job.pickup_lat, job.pickup_lng)) {
+    L.marker([job.pickup_lat, job.pickup_lng], { icon: pinIcon('pickup') }).addTo(map)
+      .bindPopup('📍 Pickup' + (job.pickup_location ? '<br>' + escapeHtml(job.pickup_location) : ''));
+    pts.push([job.pickup_lat, job.pickup_lng]);
+  }
+  if (hasPin(job.dropoff_lat, job.dropoff_lng)) {
+    L.marker([job.dropoff_lat, job.dropoff_lng], { icon: pinIcon('dropoff') }).addTo(map)
+      .bindPopup('🏁 Drop-off' + (job.dropoff_location ? '<br>' + escapeHtml(job.dropoff_location) : ''));
+    pts.push([job.dropoff_lat, job.dropoff_lng]);
+  }
+  var v = opts.vehicle;
+  if (v && hasPin(v.last_lat, v.last_lng)) {
+    L.marker([v.last_lat, v.last_lng], { icon: vanDivIcon() }).addTo(map)
+      .bindPopup('🚐 ' + escapeHtml(v.vehicle_name || 'Your vehicle'));
+    pts.push([v.last_lat, v.last_lng]);
+  }
+  if (pts.length === 1) map.setView(pts[0], 15);
+  else if (pts.length > 1) map.fitBounds(pts, { padding: [25, 25], maxZoom: 16 });
+  else map.setView([3.139, 101.6869], 12);
+  setTimeout(function () { map.invalidateSize(); }, 60);
+  return map;
+}
+
+// A reusable pickup/drop-off pin picker for the request forms. The map is
+// created lazily the first time a pin button is tapped.
+function createPinPicker(mapElId, statusElId) {
+  var st = { pickup: null, dropoff: null, mode: null, map: null, markers: {} };
+  function status() {
+    var parts = [];
+    if (st.pickup) parts.push('📍 pickup pinned');
+    if (st.dropoff) parts.push('🏁 drop-off pinned');
+    if (st.mode) parts.push('tap the map to place the ' + st.mode + ' pin');
+    var el = document.getElementById(statusElId);
+    if (el) el.textContent = parts.join(' · ');
+  }
+  function ensure() {
+    var el = document.getElementById(mapElId);
+    if (!el) return;
+    el.classList.remove('hidden');
+    if (st.map || !window.L) return;
+    st.map = L.map(mapElId);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors', maxZoom: 19,
+    }).addTo(st.map);
+    st.map.setView([3.139, 101.6869], 12);
+    st.map.on('click', function (e) {
+      if (!st.mode) return;
+      var k = st.mode;
+      st[k] = { lat: e.latlng.lat, lng: e.latlng.lng };
+      if (st.markers[k]) st.markers[k].setLatLng(e.latlng);
+      else st.markers[k] = L.marker(e.latlng, { icon: pinIcon(k) }).addTo(st.map)
+        .bindPopup(k === 'pickup' ? '📍 Pickup' : '🏁 Drop-off');
+      st.mode = null;
+      status();
+    });
+    setTimeout(function () { st.map.invalidateSize(); }, 50);
+  }
+  return {
+    arm: function (kind) { ensure(); st.mode = kind; status(); if (st.map) setTimeout(function () { st.map.invalidateSize(); }, 50); },
+    reset: function () {
+      st.pickup = null; st.dropoff = null; st.mode = null;
+      Object.keys(st.markers).forEach(function (k) { if (st.map) st.map.removeLayer(st.markers[k]); });
+      st.markers = {}; status();
+    },
+    get: function () { return { pickup: st.pickup, dropoff: st.dropoff }; },
+  };
+}
+
+// Full-screen job map: pickup, drop-off, and the driver's vehicle if its
+// position is known. A single reused overlay; navigation still hands off
+// to the phone's map app.
+function openFullMap(job, vehicle) {
+  var host = document.getElementById('fullMapHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = 'fullMapHost';
+    host.className = 'fullmap-host';
+    document.body.appendChild(host);
+  }
+  var routeUrl = mapsRouteUrl(job.pickup_lat, job.pickup_lng, job.dropoff_lat, job.dropoff_lng);
+  var openUrl = routeUrl
+    || mapsPointUrl(job.dropoff_lat, job.dropoff_lng, job.dropoff_location)
+    || mapsPointUrl(job.pickup_lat, job.pickup_lng, job.pickup_location);
+  host.innerHTML =
+    '<div class="fullmap-bar">' +
+      '<strong>Job map</strong>' +
+      '<div class="fullmap-actions">' +
+        (openUrl ? '<a class="btn btn-primary btn-small" target="_blank" rel="noopener" href="' + openUrl + '">' +
+          (routeUrl ? 'Open Route' : 'Open in Maps') + '</a>' : '') +
+        '<button id="fullMapClose" class="btn btn-outline btn-small" type="button">Close</button>' +
+      '</div>' +
+    '</div>' +
+    '<div id="fullMapCanvas"></div>';
+  host.classList.add('open');
+  var map = buildRouteMap('fullMapCanvas', job, { vehicle: vehicle, full: true });
+  document.getElementById('fullMapClose').addEventListener('click', function () {
+    host.classList.remove('open');
+    if (map) map.remove();
+    host.innerHTML = '';
+  });
+}
+
 // Location freshness for display only — the stored vehicle status is
 // never changed from the frontend. Live <= 5 min, old <= 30 min,
 // offline beyond that.

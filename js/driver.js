@@ -162,14 +162,46 @@ function initDriverPage(ctx) {
     acceptJob(btn.closest('.request-card').getAttribute('data-id'), btn);
   });
 
+  // Compact per-job maps built after render; removed before each re-render.
+  var jobMaps = [];
+  function clearJobMaps() {
+    jobMaps.forEach(function (m) { try { m.remove(); } catch (e) { /* ignore */ } });
+    jobMaps = [];
+  }
+
+  // Navigation block for a job card: text is already shown by the card;
+  // here we add "Open Pickup/Drop-off/Route in Maps" buttons, a compact
+  // map when pins exist (else a friendly note), and View Full Map.
+  function navBlockHtml(r) {
+    var pickupUrl = mapsPointUrl(r.pickup_lat, r.pickup_lng, r.pickup_location);
+    var dropUrl = mapsPointUrl(r.dropoff_lat, r.dropoff_lng, r.dropoff_location);
+    var routeUrl = mapsRouteUrl(r.pickup_lat, r.pickup_lng, r.dropoff_lat, r.dropoff_lng);
+    var hasAnyPin = hasPin(r.pickup_lat, r.pickup_lng) || hasPin(r.dropoff_lat, r.dropoff_lng);
+
+    var html = '<div class="job-nav">';
+    if (hasAnyPin) {
+      html += '<div class="job-map" id="jobmap-' + escapeHtml(r.id) + '"></div>';
+    } else {
+      html += '<p class="muted small">No map pin added for this request.</p>';
+    }
+    html += '<div class="nav-btns">';
+    if (pickupUrl) html += '<a class="btn btn-outline btn-small" target="_blank" rel="noopener" href="' + pickupUrl + '">📍 Open Pickup in Maps</a>';
+    if (dropUrl) html += '<a class="btn btn-outline btn-small" target="_blank" rel="noopener" href="' + dropUrl + '">🏁 Open Drop-off in Maps</a>';
+    if (routeUrl) html += '<a class="btn btn-outline btn-small" target="_blank" rel="noopener" href="' + routeUrl + '">🧭 Open Route in Maps</a>';
+    if (hasAnyPin) html += '<button class="btn btn-outline btn-small" type="button" data-action="fullmap">🗺️ View Full Map</button>';
+    html += '</div></div>';
+    return html;
+  }
+
   async function loadJobs() {
     var res = await window.sb
       .from('vehicle_requests')
-      .select('id, status, vehicle_id, pickup_location, dropoff_location, customer_name, customer_contact, notes, created_at, accepted_at, started_at, completed_at, outlets(name), vehicles!vehicle_id(vehicle_name, plate_number)')
+      .select('id, status, vehicle_id, pickup_location, dropoff_location, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, customer_name, customer_contact, notes, created_at, accepted_at, started_at, completed_at, outlets(name), vehicles!vehicle_id(vehicle_name, plate_number, last_lat, last_lng, last_updated)')
       .eq('driver_id', profile.driver_id)
       .in('status', ['accepted', 'in_progress'])
       .order('created_at', { ascending: true });
 
+    clearJobMaps();
     if (res.error) {
       jobsEl.innerHTML = '<div class="empty-state">Could not load jobs. Please refresh.</div>';
       return;
@@ -200,6 +232,7 @@ function initDriverPage(ctx) {
                  ' · ' + escapeHtml(r.vehicles.plate_number) + '</span>';
       }
       extra += timesHtml(r);
+      extra += navBlockHtml(r);
 
       var actions = '';
       if (r.status === 'accepted') {
@@ -216,6 +249,14 @@ function initDriverPage(ctx) {
         actionsHtml: actions,
       });
     }).join('');
+
+    // Build the compact maps for jobs that have at least one pin.
+    res.data.forEach(function (r) {
+      if (hasPin(r.pickup_lat, r.pickup_lng) || hasPin(r.dropoff_lat, r.dropoff_lng)) {
+        var m = buildRouteMap('jobmap-' + r.id, r, { vehicle: r.vehicles });
+        if (m) jobMaps.push(m);
+      }
+    });
   }
 
   // Moves a job to the next status. The guards in .eq() make the update
@@ -259,6 +300,9 @@ function initDriverPage(ctx) {
     } else if (action === 'complete') {
       setStatus(id, 'in_progress', 'completed',
         'Job completed', 'Could not complete job. Please try again.', btn);
+    } else if (action === 'fullmap') {
+      var job = activeJobs.filter(function (j) { return j.id === id; })[0];
+      if (job) openFullMap(job, job.vehicles);
     }
   });
 

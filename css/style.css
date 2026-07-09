@@ -402,7 +402,35 @@ code {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
 }
 
-#pinMap { height: 240px; border-radius: 12px; }
+#pinMap, #outPinMap { height: 240px; border-radius: 12px; }
+
+/* Driver job navigation (Stage 2C) */
+.job-nav { margin-top: 0.5rem; }
+.job-map { height: 190px; border-radius: 12px; margin-bottom: 0.5rem; }
+.nav-btns { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.nav-btns .btn { flex: 1 1 46%; min-height: 42px; }
+
+/* Distinct pickup (green P) / drop-off (red D) markers */
+.route-pin {
+  color: #fff; font-weight: 700; font-size: 14px; line-height: 22px;
+  text-align: center; border-radius: 50%; border: 2px solid rgba(255,255,255,0.85);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+.route-pin-pickup { background: #2fbf71; }
+.route-pin-dropoff { background: #e5484d; }
+
+/* Full-screen job map overlay */
+.fullmap-host {
+  position: fixed; inset: 0; z-index: 1200; display: none;
+  flex-direction: column; background: #0b1220;
+}
+.fullmap-host.open { display: flex; }
+.fullmap-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.75rem; padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(120,150,220,0.25);
+}
+.fullmap-actions { display: flex; gap: 0.5rem; }
+#fullMapCanvas { flex: 1 1 auto; }
 
 #vehicleMap, #trackMap {
   height: 320px;

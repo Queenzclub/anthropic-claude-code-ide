@@ -63,6 +63,15 @@
                 <option value="">🚚 Any available driver</option>
               </select>
             </div>
+            <div class="field full">
+              <label>Map pins (optional)</label>
+              <div class="request-actions" style="margin-bottom: 0.5rem;">
+                <button id="outPinPickupBtn" class="btn btn-outline btn-small" type="button">📍 Set pickup pin</button>
+                <button id="outPinDropoffBtn" class="btn btn-outline btn-small" type="button">🏁 Set drop-off pin</button>
+              </div>
+              <div id="outPinMap" class="hidden"></div>
+              <p class="muted small" id="outPinStatus"></p>
+            </div>
             <div class="full request-actions">
               <button id="submitRequestBtn" class="btn btn-primary" type="submit">Send Request</button>
               <button id="cancelRequestBtn" class="btn btn-outline" type="button">Cancel</button>
