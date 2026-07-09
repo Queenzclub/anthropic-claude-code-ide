@@ -6,7 +6,17 @@
 function initManagerPage(ctx) {
   var pendingEl = document.getElementById('pendingList');
   var activeEl = document.getElementById('activeList');
-  var busyDriverIds = [];
+  // Active-job counts per driver/vehicle (multi-job queues). Refreshed
+  // with the active list; used for card chips, assign-panel labels and
+  // the 3+ jobs soft warning.
+  var jobCounts = { driver: {}, vehicle: {} };
+
+  function driverJobs(id) { return (id && jobCounts.driver[id]) || 0; }
+  function vehicleJobs(id) { return (id && jobCounts.vehicle[id]) || 0; }
+  function queueWarning(prefix, n) {
+    return prefix + ' already has ' + n + ' active job' + (n === 1 ? '' : 's') +
+      '. This request was added to their queue.';
+  }
 
   // Where a request came from: the outlet's name, or a manager.
   function originLine(r) {
@@ -134,9 +144,14 @@ function initManagerPage(ctx) {
     }
     resetCreateForm();
     createHost.classList.add('hidden');
-    showFlash(target
-      ? 'Request sent to ' + target.driver_name + '.'
-      : 'Request sent to available drivers.', 'success');
+    if (target && driverJobs(target.driver_id) >= 3) {
+      showFlash('Request sent to ' + target.driver_name + '. ' +
+        queueWarning('This driver', driverJobs(target.driver_id)), 'warn');
+    } else {
+      showFlash(target
+        ? 'Request sent to ' + target.driver_name + '.'
+        : 'Request sent to available drivers.', 'success');
+    }
     loadAll();
   }
 
@@ -192,7 +207,11 @@ function initManagerPage(ctx) {
       return;
     }
 
-    busyDriverIds = res.data.map(function (r) { return r.driver_id; }).filter(Boolean);
+    jobCounts = { driver: {}, vehicle: {} };
+    res.data.forEach(function (r) {
+      if (r.driver_id) jobCounts.driver[r.driver_id] = (jobCounts.driver[r.driver_id] || 0) + 1;
+      if (r.vehicle_id) jobCounts.vehicle[r.vehicle_id] = (jobCounts.vehicle[r.vehicle_id] || 0) + 1;
+    });
 
     if (!res.data.length) {
       activeEl.innerHTML = '<div class="empty-state">No active jobs.</div>';
@@ -330,18 +349,25 @@ function initManagerPage(ctx) {
         ? '<span class="chip fresh-live">🟢 On Duty</span>'
         : '<span class="chip fresh-offline">⚪ Off Duty</span>';
     }
+    var jobs = vehicleJobs(v.id);
+    var jobsChip = jobs
+      ? '<span class="chip">📦 ' + jobs + ' active job' + (jobs === 1 ? '' : 's') + '</span>'
+      : '';
     return '<div class="card">' +
       '<div class="request-top"><strong>' + escapeHtml(v.vehicle_name) + '</strong>' +
         statusBadge(v.status) + '</div>' +
       '<div class="meta">🔖 ' + escapeHtml(v.plate_number) + '</div>' +
       '<div class="meta">👤 ' + (v.drivers ? escapeHtml(v.drivers.name) : 'No driver assigned') + '</div>' +
       '<div class="meta">🕐 ' + (v.last_updated ? 'Updated ' + escapeHtml(fmtTime(v.last_updated)) : 'No location yet') + '</div>' +
-      '<span class="chip fresh-' + fresh.cls + '">' + escapeHtml(fresh.label) + '</span>' + duty +
+      '<span class="chip fresh-' + fresh.cls + '">' + escapeHtml(fresh.label) + '</span>' + duty + jobsChip +
     '</div>';
   }
 
   function vehiclePopup(v) {
-    return vehiclePopupHtml(v, { driverName: v.drivers && v.drivers.name });
+    var html = vehiclePopupHtml(v, { driverName: v.drivers && v.drivers.name });
+    var jobs = vehicleJobs(v.id);
+    if (jobs) html += '<br>📦 ' + jobs + ' active job' + (jobs === 1 ? '' : 's');
+    return html;
   }
 
   function renderMap(vehicles) {
@@ -420,10 +446,11 @@ function initManagerPage(ctx) {
       '<div class="inline-panel" data-panel><p class="muted">Loading…</p></div>');
     var panel = card.querySelector('[data-panel]');
 
+    // Multi-job queues: busy vehicles and drivers CAN take another job —
+    // they are listed with their current job count. Maintenance stays out.
     var vehiclesRes = await window.sb
       .from('vehicles')
-      .select('id, vehicle_name, plate_number')
-      .eq('status', 'available')
+      .select('id, vehicle_name, plate_number, status')
       .eq('active', true)
       .order('vehicle_name', { ascending: true });
     var driversRes = await window.sb
@@ -438,11 +465,8 @@ function initManagerPage(ctx) {
       return;
     }
 
-    var vehicles = vehiclesRes.data;
-    // Drivers already on an active job cannot take another one.
-    var drivers = driversRes.data.filter(function (d) {
-      return busyDriverIds.indexOf(d.id) === -1;
-    });
+    var vehicles = vehiclesRes.data.filter(function (v) { return v.status !== 'maintenance'; });
+    var drivers = driversRes.data;
 
     var backBtn = '<button class="btn btn-outline" type="button" data-action="close-panel">Back</button>';
     if (!vehicles.length) {
@@ -457,11 +481,15 @@ function initManagerPage(ctx) {
     }
 
     var vehicleOptions = vehicles.map(function (v) {
+      var jobs = vehicleJobs(v.id);
       return '<option value="' + escapeHtml(v.id) + '">' +
-        escapeHtml(v.vehicle_name) + ' · ' + escapeHtml(v.plate_number) + '</option>';
+        escapeHtml(v.vehicle_name) + ' · ' + escapeHtml(v.plate_number) +
+        (jobs ? ' (' + jobs + ' job' + (jobs === 1 ? '' : 's') + ')' : '') + '</option>';
     }).join('');
     var driverOptions = drivers.map(function (d) {
-      return '<option value="' + escapeHtml(d.id) + '">' + escapeHtml(d.name) + '</option>';
+      var jobs = driverJobs(d.id);
+      return '<option value="' + escapeHtml(d.id) + '">' + escapeHtml(d.name) +
+        (jobs ? ' (' + jobs + ' job' + (jobs === 1 ? '' : 's') + ')' : '') + '</option>';
     }).join('');
 
     panel.innerHTML =
@@ -515,7 +543,12 @@ function initManagerPage(ctx) {
       loadAll();
       return;
     }
-    showFlash('Request assigned successfully.', 'success');
+    var jobsBefore = driverJobs(driverId);
+    if (jobsBefore >= 3) {
+      showFlash('Assigned. ' + queueWarning('This driver', jobsBefore), 'warn');
+    } else {
+      showFlash('Request assigned successfully.', 'success');
+    }
     loadAll();
   }
 

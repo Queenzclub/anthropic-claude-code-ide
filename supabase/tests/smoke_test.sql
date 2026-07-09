@@ -25,6 +25,11 @@ insert into public.drivers (id, company_id, name) values
   ('40000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Driver One'),
   ('40000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000001', 'Driver Two');
 
+-- Seeded drivers mirror the migration-12 production backfill (the seed
+-- runs AFTER migrations, so the backfill can't reach these rows itself).
+-- Without this, open-dispatch tests silently see zero rows (off duty).
+update public.drivers set on_duty = true, on_duty_since = now();
+
 insert into public.vehicles (id, company_id, vehicle_name, plate_number, driver_id) values
   ('50000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'Van 1', 'ABC-123',
    '40000000-0000-0000-0000-000000000001'),
@@ -67,14 +72,47 @@ where status='pending';
 select v.status, r.accepted_at is not null as stamped
 from public.vehicles v join public.vehicle_requests r on r.vehicle_id = v.id;
 
-\echo 'TEST 5: double-booking same vehicle rejected (expect PASS)'
+\echo 'TEST 5: multi-job — a second job on the same vehicle+driver is allowed, and the vehicle stays busy until the LAST active job closes (expect PASS x3)'
+-- Second accepted job on the same van AND driver (blocked before 2B-3).
+insert into public.vehicle_requests (id, company_id, outlet_id, driver_id, vehicle_id, status, pickup_location, dropoff_location, requested_by)
+values ('70000000-0000-0000-0000-00000000000a','10000000-0000-0000-0000-000000000001',
+        '30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001',
+        '50000000-0000-0000-0000-000000000001','accepted','A','B','a0000000-0000-0000-0000-000000000002');
 do $$ begin
-  insert into public.vehicle_requests (company_id, outlet_id, vehicle_id, status, pickup_location, dropoff_location, requested_by)
-  values ('10000000-0000-0000-0000-000000000001','30000000-0000-0000-0000-000000000001',
-          '50000000-0000-0000-0000-000000000001','accepted','A','B','a0000000-0000-0000-0000-000000000002');
-  raise exception 'FAIL: double booking allowed';
-exception when unique_violation then raise notice 'PASS: unique index blocked double booking';
+  if (select status from public.vehicles where id='50000000-0000-0000-0000-000000000001') <> 'busy' then
+    raise exception 'FAIL: vehicle not busy with two active jobs';
+  end if;
+  raise notice 'PASS: second job stacked, vehicle busy';
 end $$;
+-- Complete the second job: the van must STAY busy (job one still active).
+update public.vehicle_requests set status='in_progress' where id='70000000-0000-0000-0000-00000000000a';
+update public.vehicle_requests set status='completed'  where id='70000000-0000-0000-0000-00000000000a';
+do $$ begin
+  if (select status from public.vehicles where id='50000000-0000-0000-0000-000000000001') <> 'busy' then
+    raise exception 'FAIL: vehicle freed while another job is still active';
+  end if;
+  raise notice 'PASS: completing 1 of 2 keeps the vehicle busy';
+end $$;
+-- Third job, then cancel it: the van must STILL stay busy.
+insert into public.vehicle_requests (id, company_id, outlet_id, driver_id, vehicle_id, status, pickup_location, dropoff_location, requested_by)
+values ('70000000-0000-0000-0000-00000000000b','10000000-0000-0000-0000-000000000001',
+        '30000000-0000-0000-0000-000000000001','40000000-0000-0000-0000-000000000001',
+        '50000000-0000-0000-0000-000000000001','accepted','C','D','a0000000-0000-0000-0000-000000000002');
+update public.vehicle_requests set status='cancelled' where id='70000000-0000-0000-0000-00000000000b';
+do $$ begin
+  if (select status from public.vehicles where id='50000000-0000-0000-0000-000000000001') <> 'busy' then
+    raise exception 'FAIL: vehicle freed by a cancel while another job is still active';
+  end if;
+  raise notice 'PASS: cancelling 1 of 2 keeps the vehicle busy';
+end $$;
+-- Cleanup (service step) so later history/count tests keep their
+-- original expectations; the surviving job one continues the suite.
+reset role;
+select set_config('request.jwt.claim.sub', '', false) \g /dev/null
+delete from public.vehicle_requests
+where id in ('70000000-0000-0000-0000-00000000000a','70000000-0000-0000-0000-00000000000b');
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000002', false) \g /dev/null
 
 -- ============ Driver session ============
 select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
@@ -353,7 +391,7 @@ select
   (select count(*) from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000001') as sees_open,
   (select count(*) from public.vehicle_requests where id = '70000000-0000-0000-0000-000000000002') as sees_other_target;
 
-\echo 'TEST 28: driver accepts the open request WITHOUT sending a vehicle -> claimed, accepted, and the trigger auto-assigns their van (expect t | accepted | t)'
+\echo 'TEST 28: driver accepts the open request WITHOUT sending a vehicle -> claimed, accepted, and the trigger auto-assigns their van (expect PASS)'
 update public.vehicle_requests
   set status = 'accepted',
       driver_id = app.my_driver_id()
@@ -362,6 +400,18 @@ update public.vehicle_requests
     (driver_id = '40000000-0000-0000-0000-000000000001') as claimed_by_me,
     status,
     (vehicle_id = '50000000-0000-0000-0000-000000000001') as van_auto_assigned;
+do $$ begin
+  if not exists (
+    select 1 from public.vehicle_requests
+    where id = '70000000-0000-0000-0000-000000000001'
+      and status = 'accepted'
+      and driver_id = '40000000-0000-0000-0000-000000000001'
+      and vehicle_id = '50000000-0000-0000-0000-000000000001'
+  ) then
+    raise exception 'FAIL: driver self-accept did not claim + auto-assign the van';
+  end if;
+  raise notice 'PASS: self-accept claimed the job and auto-assigned the van';
+end $$;
 
 \echo 'TEST 29: driver cannot claim a request targeted at another driver (expect PASS)'
 do $$ begin
@@ -376,12 +426,15 @@ do $$ begin
 end $$;
 reset role;
 
-\echo 'TEST 30: outlet can track the van for a DRIVER-accepted open request (no manager assignment) (expect t)'
+\echo 'TEST 30: outlet can track the van for a DRIVER-accepted open request (no manager assignment) (expect PASS)'
 set role authenticated;
 select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000003', false) \g /dev/null
-select exists(
-  select 1 from public.vehicles where id = '50000000-0000-0000-0000-000000000001'
-) as outlet_can_track_van;
+do $$ begin
+  if not exists (select 1 from public.vehicles where id = '50000000-0000-0000-0000-000000000001') then
+    raise exception 'FAIL: outlet cannot track the driver-accepted van';
+  end if;
+  raise notice 'PASS: outlet tracks the driver-accepted van';
+end $$;
 reset role;
 
 -- ============ Driver duty status (2B-1) ============
@@ -524,6 +577,29 @@ do $$ begin
   else
     raise exception 'FAIL: claimed another driver''s targeted request';
   end if;
+end $$;
+reset role;
+
+-- ============ Multi-job driver stacking (2B-3) ============
+\echo 'TEST 37: driver with an active job self-accepts ANOTHER open request (expect t | accepted — was impossible before 2B-3)'
+set role authenticated;
+select set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-000000000004', false) \g /dev/null
+-- Driver One already holds job 70..001 (accepted in TEST 28) and is on
+-- duty (TEST 32); 70..003 is the still-pending open request from TEST 31.
+update public.vehicle_requests
+  set status = 'accepted', driver_id = app.my_driver_id()
+  where id = '70000000-0000-0000-0000-000000000003' and status = 'pending'
+  returning (driver_id = '40000000-0000-0000-0000-000000000001') as stacked_on_me, status;
+do $$
+declare n int;
+begin
+  select count(*) into n from public.vehicle_requests
+  where driver_id = '40000000-0000-0000-0000-000000000001'
+    and status in ('accepted','in_progress');
+  if n < 2 then
+    raise exception 'FAIL: expected a 2-job queue for the driver, found %', n;
+  end if;
+  raise notice 'PASS: driver now carries % active jobs at once', n;
 end $$;
 reset role;
 
