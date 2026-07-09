@@ -166,6 +166,23 @@ another company's vehicles):
 The latest reported note shows on the manager and admin vehicle cards;
 returning a vehicle to **available/offline** clears it.
 
+## KM / odometer tracking
+
+Each job can capture odometer readings. The driver enters **Start KM**
+when starting a trip and **End KM** when completing it (both optional — a
+job still completes with no KM). **Total KM** is derived as end − start
+and shown wherever the job appears. When End KM is entered, the vehicle's
+**current_km** rolls forward to it (never backward, so a completed trip
+advances the odometer and a stray low reading can't reduce it).
+
+Enforced server-side (Migration 19), not just the UI: KM must be
+non-negative and End KM cannot be below Start KM; a driver can only
+enter/edit KM on their **own active** job, never on a closed one — after
+that only a manager/admin can correct it (from the Active Jobs card), and
+an admin can set a vehicle's odometer directly in the Vehicles section.
+Managers/admins see KM on active jobs, job history and vehicle cards.
+**Outlet users never see KM.**
+
 ## Dispatch selection
 
 Requests can go to **any available driver** (open dispatch, the

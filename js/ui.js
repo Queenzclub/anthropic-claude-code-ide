@@ -234,6 +234,19 @@ function locationFreshness(lastUpdated) {
   return { label: 'Offline', cls: 'offline' };
 }
 
+// A compact "KM" line for a job: start, end and the derived total.
+// Empty when no odometer was captured. Used by driver history and the
+// manager/admin views — never rendered for outlet users (Stage 3B).
+function kmSummaryHtml(r) {
+  if (r.start_km == null && r.end_km == null) return '';
+  var parts = [];
+  if (r.start_km != null) parts.push('start ' + escapeHtml(r.start_km));
+  if (r.end_km != null) parts.push('end ' + escapeHtml(r.end_km));
+  var total = (r.start_km != null && r.end_km != null) ? (r.end_km - r.start_km) : null;
+  var t = total != null ? ' · total ' + escapeHtml(total) + ' km' : '';
+  return '<div class="meta">🧭 KM: ' + parts.join(' → ') + t + '</div>';
+}
+
 // One muted line with the job's lifecycle times (only the ones set).
 function timesHtml(r) {
   var parts = [];

@@ -79,7 +79,7 @@ function initAdminPage(ctx) {
     var results = await Promise.all([
       window.sb.from('outlets').select('id, name, address, phone, active').order('name', { ascending: true }),
       window.sb.from('drivers').select('id, name, phone, license_number, active').order('name', { ascending: true }),
-      window.sb.from('vehicles').select('id, vehicle_name, plate_number, status, service_note, driver_id, active').order('vehicle_name', { ascending: true }),
+      window.sb.from('vehicles').select('id, vehicle_name, plate_number, status, service_note, current_km, driver_id, active').order('vehicle_name', { ascending: true }),
       window.sb.from('profiles').select('user_id, name, email, phone, role, active, outlet_id, driver_id, outlets(name), drivers(name)').order('email', { ascending: true }),
     ]);
     if (results.some(function (r) { return r.error; })) {
@@ -335,7 +335,9 @@ function initAdminPage(ctx) {
       html += fieldHtml('Status', '<select data-role="vehicle-status">' + statusOptions + '</select>') +
         fieldHtml('Default driver', '<select data-role="vehicle-driver">' +
           selectOptions(cache.drivers.filter(function (d) { return d.active; }), v.driver_id, 'No default driver', function (d) { return d.name; }) +
-          '</select>');
+          '</select>') +
+        fieldHtml('Current KM (odometer)', '<input data-role="vehicle-km" type="number" min="0" inputmode="numeric" value="' +
+          (v.current_km != null ? escapeHtml(v.current_km) : '') + '" placeholder="Latest odometer reading">');
     }
     return html + '</div>' + panelActions(saveAction, saveLabel) + '</div>';
   }
@@ -348,6 +350,7 @@ function initAdminPage(ctx) {
         '<span>' + statusBadge(v.status) + ' ' + activeBadge(v.active) + '</span></div>' +
         '<div class="meta">🔖 ' + escapeHtml(v.plate_number) + '</div>' +
         (driver ? '<div class="meta">👤 ' + escapeHtml(driver.name) + '</div>' : '') +
+        (v.current_km != null ? '<div class="meta">🧭 Odometer: ' + escapeHtml(v.current_km) + ' km</div>' : '') +
         (v.service_note ? '<div class="meta">📝 Reported: ' + escapeHtml(v.service_note) + '</div>' : '') +
         '<div class="request-actions">' +
           '<button class="btn btn-outline" type="button" data-action="edit-vehicle">Edit</button>' +
@@ -365,6 +368,15 @@ function initAdminPage(ctx) {
     if (v) {
       data.status = readPanel(scope, 'vehicle-status') || v.status;
       data.driver_id = readPanel(scope, 'vehicle-driver') || null;
+      // Admin can correct the odometer (blank = leave unset/cleared).
+      var kmStr = readPanel(scope, 'vehicle-km');
+      if (kmStr === '') {
+        data.current_km = null;
+      } else {
+        var kmNum = Number(kmStr);
+        if (!isFinite(kmNum) || kmNum < 0) { showFlash('Please enter a valid odometer (0 or more).', 'error'); return; }
+        data.current_km = kmNum;
+      }
       // Returning a vehicle to service clears any reported issue note.
       if (data.status === 'available' || data.status === 'offline') data.service_note = null;
       // Taking a busy vehicle out of service mid-job is allowed (e.g. a
@@ -423,7 +435,7 @@ function initAdminPage(ctx) {
   async function loadJobs() {
     var q = window.sb
       .from('vehicle_requests')
-      .select('id, status, pickup_location, dropoff_location, customer_name, customer_contact, notes, cancellation_reason, created_at, accepted_at, started_at, completed_at, cancelled_at, outlets(name), drivers!driver_id(name), vehicles!vehicle_id(vehicle_name, plate_number)');
+      .select('id, status, start_km, end_km, pickup_location, dropoff_location, customer_name, customer_contact, notes, cancellation_reason, created_at, accepted_at, started_at, completed_at, cancelled_at, outlets(name), drivers!driver_id(name), vehicles!vehicle_id(vehicle_name, plate_number)');
     if (jobFilter !== 'all') q = q.eq('status', jobFilter);
     var res = await q.order('updated_at', { ascending: false }).limit(20);
 
@@ -440,7 +452,7 @@ function initAdminPage(ctx) {
       if (r.drivers && r.drivers.name) extra += '<span class="chip">👤 ' + escapeHtml(r.drivers.name) + '</span>';
       if (r.vehicles) extra += '<span class="chip">🚐 ' + escapeHtml(r.vehicles.vehicle_name) + ' · ' + escapeHtml(r.vehicles.plate_number) + '</span>';
       if (r.cancellation_reason) extra += '<div class="meta">💬 Reason: ' + escapeHtml(r.cancellation_reason) + '</div>';
-      extra += timesHtml(r);
+      extra += timesHtml(r) + kmSummaryHtml(r);
       var outletName = r.outlets && r.outlets.name;
       return requestCardHtml(r, {
         topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '🧑‍💼 Manager request',
