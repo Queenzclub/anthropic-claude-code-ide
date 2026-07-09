@@ -179,13 +179,15 @@ function createLiveVehicleMap(mapElId) {
   };
 }
 
-// Shows a message in the page's #flash area. type: 'success' | 'error'.
+// Shows a message in the page's #flash area.
+// type: 'success' | 'error' | 'warn' (amber, non-blocking heads-up).
 function showFlash(message, type) {
   var host = document.getElementById('flash');
   if (!host) return;
-  host.innerHTML = '<div class="alert ' +
-    (type === 'success' ? 'alert-success' : 'alert-error') + '">' +
-    escapeHtml(message) + '</div>';
+  var cls = type === 'success' ? 'alert-success'
+    : type === 'warn' ? 'alert-warn'
+    : 'alert-error';
+  host.innerHTML = '<div class="alert ' + cls + '">' + escapeHtml(message) + '</div>';
   clearTimeout(showFlash._timer);
   showFlash._timer = setTimeout(function () { host.innerHTML = ''; }, 5000);
   host.scrollIntoView({ block: 'nearest' });

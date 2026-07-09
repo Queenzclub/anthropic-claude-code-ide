@@ -113,6 +113,12 @@ code {
   color: #a4ecc6;
 }
 
+.alert-warn {
+  background: rgba(240, 160, 32, 0.12);
+  border: 1px solid rgba(240, 160, 32, 0.45);
+  color: #ffd08a;
+}
+
 /* ---------- Badges ---------- */
 
 .badge {

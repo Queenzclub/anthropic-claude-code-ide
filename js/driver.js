@@ -116,9 +116,12 @@ function initDriverPage(ctx) {
         : '<span class="chip">📢 Open request</span>';
       var outletName = r.outlets && r.outlets.name;
       var origin = outletName ? '🏬 ' + escapeHtml(outletName) : '🧑‍💼 Manager request';
+      var stackHint = activeJobs.length
+        ? '<p class="muted small">Adds to your current jobs (' + activeJobs.length + ' active)</p>'
+        : '';
       return requestCardHtml(r, {
         topLine: origin + ' ' + mode,
-        actionsHtml: '<button class="btn btn-primary btn-block" type="button" data-action="accept">Accept Job</button>',
+        actionsHtml: '<button class="btn btn-primary btn-block" type="button" data-action="accept">Accept Job</button>' + stackHint,
       });
     }).join('');
   }
@@ -137,15 +140,15 @@ function initDriverPage(ctx) {
 
     if (res.error) {
       btn.disabled = false;
-      if (res.error.code === '23505') {
-        showFlash('You already have an active job on this vehicle.', 'error');
-      } else {
-        showFlash('Could not accept the job. Please try again.', 'error');
-      }
+      showFlash('Could not accept the job. Please try again.', 'error');
       return;
     }
     if (!res.data || !res.data.length) {
       showFlash('This request was already taken.', 'error');
+    } else if (activeJobs.length >= 3) {
+      // Soft warning only — stacking is allowed, just make it visible.
+      showFlash('Job accepted. You already had ' + activeJobs.length +
+        ' active jobs — this one was added to your queue.', 'warn');
     } else {
       showFlash('Job accepted', 'success');
     }
@@ -179,11 +182,18 @@ function initDriverPage(ctx) {
       stopSharing('Location sharing stopped');
     }
 
+    var jobsBadge = document.getElementById('jobsBadge');
+    if (jobsBadge) {
+      if (res.data.length) { jobsBadge.textContent = res.data.length; jobsBadge.classList.remove('hidden'); }
+      else jobsBadge.classList.add('hidden');
+    }
     if (!res.data.length) {
       jobsEl.innerHTML = '<div class="empty-state">No job assigned yet. New jobs will appear here.</div>';
       return;
     }
-    jobsEl.innerHTML = res.data.map(function (r) {
+    // The queue is numbered by accept order (query is ordered by
+    // created_at ascending); each job keeps its own Start/Complete.
+    jobsEl.innerHTML = res.data.map(function (r, i) {
       var extra = '';
       if (r.vehicles) {
         extra += '<span class="chip">🚐 ' + escapeHtml(r.vehicles.vehicle_name) +
@@ -199,8 +209,9 @@ function initDriverPage(ctx) {
       }
 
       var outletName = r.outlets && r.outlets.name;
+      var origin = outletName ? '🏬 ' + escapeHtml(outletName) : '🧑‍💼 Manager request';
       return requestCardHtml(r, {
-        topLine: outletName ? '🏬 ' + escapeHtml(outletName) : '🧑‍💼 Manager request',
+        topLine: '<strong>#' + (i + 1) + '</strong> · ' + origin,
         extraHtml: extra,
         actionsHtml: actions,
       });

@@ -110,6 +110,18 @@ subscription plus a server or Supabase Edge Function that sends the
 push. That is a deliberate later step; today, alerts require the app to
 be open in the background.
 
+## Multi-job queues
+
+One driver (and their vehicle) can carry **several active deliveries at
+once**. The driver dashboard shows a numbered job queue with an
+independent Start/Complete per job; manager vehicle cards show how many
+active jobs each van carries; the assign panel lists busy
+drivers/vehicles with their job counts so queuing another delivery is a
+visible choice. A vehicle stays **busy until its last active job is
+completed or cancelled** — enforced in the database, not the UI. When a
+driver or manager stacks a job on someone with 3 or more active jobs, a
+soft warning is shown; nothing is blocked.
+
 ## Dispatch selection
 
 Requests can go to **any available driver** (open dispatch, the
