@@ -45,6 +45,7 @@
             <button id="refreshJobs" class="btn btn-outline btn-small" type="button">Refresh</button>
           </div>
         </div>
+        <div id="acceptBlock" class="alert alert-warn hidden" style="margin-bottom: 0.75rem;"></div>
         <div id="availableList" class="request-list"></div>
         <p class="muted small">Alerts show while the app is open. Background push when fully closed comes later.</p>
       </section>
@@ -74,6 +75,7 @@
             <button id="reportServiceDue" class="btn btn-outline btn-block" type="button">Mark Service Due</button>
             <button id="reportDamaged" class="btn btn-danger btn-block" type="button">Report Damaged / Problem</button>
           </div>
+          <p class="muted small hidden" id="reportIssueMsg">This vehicle already has an open issue. Manager/admin must clear it first.</p>
           <p class="muted small">Only a manager or admin can clear a reported issue.</p>
         </div>
       </section>
