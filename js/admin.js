@@ -354,10 +354,47 @@ function initAdminPage(ctx) {
         (v.service_note ? '<div class="meta">📝 Reported: ' + escapeHtml(v.service_note) + '</div>' : '') +
         '<div class="request-actions">' +
           '<button class="btn btn-outline" type="button" data-action="edit-vehicle">Edit</button>' +
+          '<button class="btn btn-outline" type="button" data-action="fuel">⛽ Fuel</button>' +
           '<button class="btn btn-outline" type="button" data-action="toggle-vehicle">' + (v.active ? 'Deactivate' : 'Activate') + '</button>' +
         '</div></div>';
     }).join('') : '<div class="empty-state">No vehicles yet. Add your first vehicle above.</div>';
   }
+
+  // Fuel panel on admin vehicle cards (own listener; the section's generic
+  // wireSection ignores fuel actions).
+  async function openFuelPanel(card, id) {
+    card.querySelectorAll('[data-panel]').forEach(function (p) { p.remove(); });
+    var logs = await fetchVehicleFuel(id);
+    card.insertAdjacentHTML('beforeend', fuelPanelHtml(logs));
+    var when = card.querySelector('[data-fuel] [data-role="fuel-when"]');
+    if (when) when.value = localDatetimeValue();
+  }
+  async function addFuel(card, id, btn) {
+    var scope = card.querySelector('[data-fuel]');
+    var f = readFuelForm(scope);
+    if (!f.ok) { showFlash(f.error, 'error'); return; }
+    btn.disabled = true;
+    var row = Object.assign({ company_id: profile.company_id, vehicle_id: id, created_by: myUid }, f.row);
+    var res = await window.sb.from('fuel_logs').insert(row).select('id');
+    btn.disabled = false;
+    if (res.error || !res.data || !res.data.length) {
+      showFlash('Could not save fuel entry. Please try again.', 'error');
+      return;
+    }
+    showFlash('Fuel entry added.', 'success');
+    openFuelPanel(card, id);
+  }
+  vehicleListEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    var card = btn.closest('.card[data-id]');
+    if (!card) return;
+    var id = card.getAttribute('data-id');
+    var action = btn.getAttribute('data-action');
+    if (action === 'fuel') openFuelPanel(card, id);
+    else if (action === 'save-fuel') addFuel(card, id, btn);
+    else if (action === 'close-fuel') { var p = card.querySelector('[data-fuel]'); if (p) p.remove(); }
+  });
 
   async function saveVehicle(scope, id, btn) {
     var name = readPanel(scope, 'vehicle-name');
@@ -532,6 +569,30 @@ function initAdminPage(ctx) {
     loadJobs();
   });
 
+  // ---------- Company settings (driver fuel entry toggle) ----------
+  var driverFuelToggle = document.getElementById('driverFuelToggle');
+  async function loadSettings() {
+    var res = await window.sb.from('companies')
+      .select('allow_driver_fuel_entry').eq('id', profile.company_id).maybeSingle();
+    if (!res.error && res.data) driverFuelToggle.checked = !!res.data.allow_driver_fuel_entry;
+  }
+  if (driverFuelToggle) {
+    driverFuelToggle.addEventListener('change', async function () {
+      var next = driverFuelToggle.checked;
+      driverFuelToggle.disabled = true;
+      var res = await window.sb.from('companies')
+        .update({ allow_driver_fuel_entry: next }).eq('id', profile.company_id).select('id');
+      driverFuelToggle.disabled = false;
+      if (res.error || !res.data || !res.data.length) {
+        driverFuelToggle.checked = !next;
+        showFlash('Could not update the setting. Please try again.', 'error');
+        return;
+      }
+      showFlash(next ? 'Driver fuel entry enabled.' : 'Driver fuel entry disabled.', 'success');
+    });
+  }
+
   document.getElementById('refreshAll').addEventListener('click', refreshAll);
+  loadSettings();
   refreshAll();
 }

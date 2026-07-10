@@ -395,6 +395,7 @@ function initManagerPage(ctx) {
     var control = '<div class="svc-control">' +
       '<select data-role="svc-status" aria-label="Service status">' + svcStatusOptions(v.status, jobs > 0) + '</select>' +
       '<button class="btn btn-outline btn-small" type="button" data-action="set-status">Update</button>' +
+      '<button class="btn btn-outline btn-small" type="button" data-action="fuel">⛽ Fuel</button>' +
     '</div>';
     return '<div class="card" data-id="' + escapeHtml(v.id) + '">' +
       '<div class="request-top"><strong>' + escapeHtml(v.vehicle_name) + '</strong>' +
@@ -436,12 +437,53 @@ function initManagerPage(ctx) {
     loadVehicles();
   }
 
+  // Open the inline fuel panel on a vehicle card: recent entries, today's
+  // totals and an add form. RLS keeps everything company-scoped.
+  async function openFuelPanel(card, id) {
+    card.querySelectorAll('[data-fuel]').forEach(function (p) { p.remove(); });
+    var logs = await fetchVehicleFuel(id);
+    card.insertAdjacentHTML('beforeend', fuelPanelHtml(logs));
+    var when = card.querySelector('[data-fuel] [data-role="fuel-when"]');
+    if (when) when.value = localDatetimeValue();
+  }
+
+  async function addFuel(card, id, btn) {
+    var scope = card.querySelector('[data-fuel]');
+    var f = readFuelForm(scope);
+    if (!f.ok) { showFlash(f.error, 'error'); return; }
+    btn.disabled = true;
+    var row = Object.assign({
+      company_id: ctx.profile.company_id,
+      vehicle_id: id,
+      created_by: ctx.profile.user_id,
+    }, f.row);
+    var res = await window.sb.from('fuel_logs').insert(row).select('id');
+    btn.disabled = false;
+    if (res.error || !res.data || !res.data.length) {
+      showFlash('Could not save fuel entry. Please try again.', 'error');
+      return;
+    }
+    showFlash('Fuel entry added.', 'success');
+    openFuelPanel(card, id);
+  }
+
   vehiclesEl.addEventListener('click', function (e) {
-    var btn = e.target.closest('button[data-action="set-status"]');
+    var btn = e.target.closest('button[data-action]');
     if (!btn) return;
     var card = btn.closest('.card[data-id]');
-    var sel = card && card.querySelector('[data-role="svc-status"]');
-    if (card && sel) setVehicleStatus(card.getAttribute('data-id'), sel.value, btn);
+    if (!card) return;
+    var id = card.getAttribute('data-id');
+    var action = btn.getAttribute('data-action');
+    if (action === 'set-status') {
+      var sel = card.querySelector('[data-role="svc-status"]');
+      if (sel) setVehicleStatus(id, sel.value, btn);
+    } else if (action === 'fuel') {
+      openFuelPanel(card, id);
+    } else if (action === 'save-fuel') {
+      addFuel(card, id, btn);
+    } else if (action === 'close-fuel') {
+      var p = card.querySelector('[data-fuel]'); if (p) p.remove();
+    }
   });
 
   function vehiclePopup(v) {
