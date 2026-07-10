@@ -247,6 +247,105 @@ function kmSummaryHtml(r) {
   return '<div class="meta">🧭 KM: ' + parts.join(' → ') + t + '</div>';
 }
 
+// ---------- Fuel logs (Stage 3C) ----------
+// Shared helpers used by the manager/admin vehicle cards and the gated
+// driver form. Totals are always computed here, never stored.
+function fuelDayStartIso() {
+  var d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString();
+}
+
+function fuelTotalsToday(logs) {
+  var start = fuelDayStartIso(), l = 0, c = 0, n = 0, anyCost = false;
+  (logs || []).forEach(function (f) {
+    if (String(f.filled_at) >= start) {
+      if (f.liters != null) l += Number(f.liters);
+      if (f.cost != null) { c += Number(f.cost); anyCost = true; }
+      n += 1;
+    }
+  });
+  return { liters: l, cost: c, count: n, anyCost: anyCost };
+}
+
+function fuelTotalsLine(logs) {
+  var t = fuelTotalsToday(logs);
+  if (!t.count) return '<div class="meta muted">No fuel logged today.</div>';
+  return '<div class="meta"><strong>Today:</strong> ' + escapeHtml(t.liters) + ' L' +
+    (t.anyCost ? ' · cost ' + escapeHtml(t.cost) : '') +
+    ' · ' + t.count + ' fill' + (t.count === 1 ? '' : 's') + '</div>';
+}
+
+function fuelEntryHtml(f) {
+  var bits = [];
+  if (f.liters != null) bits.push(escapeHtml(f.liters) + ' L');
+  if (f.cost != null) bits.push('cost ' + escapeHtml(f.cost));
+  var who = (f.drivers && f.drivers.name) ? ' · ' + escapeHtml(f.drivers.name) : '';
+  var html = '<div class="meta">⛽ ' + (bits.join(' · ') || 'entry') +
+    ' · ' + escapeHtml(fmtTime(f.filled_at)) + who;
+  if (f.note) html += '<br><span class="muted">📝 ' + escapeHtml(f.note) + '</span>';
+  return html + '</div>';
+}
+
+// Datetime-local input value for "now" (local time, no seconds).
+function localDatetimeValue(d) {
+  d = d || new Date();
+  var p = function (n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+    'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+function fuelFormHtml() {
+  return '<div class="form-grid">' +
+    '<div class="field"><label>Liters</label><input data-role="fuel-liters" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 40"></div>' +
+    '<div class="field"><label>Cost (optional)</label><input data-role="fuel-cost" type="number" min="0" step="any" inputmode="decimal" placeholder="e.g. 120"></div>' +
+    '<div class="field"><label>Date / time</label><input data-role="fuel-when" type="datetime-local"></div>' +
+    '<div class="field"><label>Note (optional)</label><input data-role="fuel-note" placeholder="e.g. full tank"></div>' +
+  '</div>';
+}
+
+// Reads + validates the fuel form. Returns { ok, row } where row carries
+// liters/cost/note/filled_at — the caller adds company/vehicle/driver ids.
+function readFuelForm(scope) {
+  function num(role) {
+    var el = scope.querySelector('[data-role="' + role + '"]');
+    if (!el || el.value.trim() === '') return { v: null };
+    var n = Number(el.value);
+    return (isFinite(n) && n >= 0) ? { v: n } : { bad: true };
+  }
+  var l = num('fuel-liters'), c = num('fuel-cost');
+  if (l.bad || c.bad) return { ok: false, error: 'Please enter valid liters/cost (0 or more).' };
+  if (l.v == null && c.v == null) return { ok: false, error: 'Enter at least liters or cost.' };
+  var whenEl = scope.querySelector('[data-role="fuel-when"]');
+  var when = (whenEl && whenEl.value) ? new Date(whenEl.value).toISOString() : new Date().toISOString();
+  var noteEl = scope.querySelector('[data-role="fuel-note"]');
+  return { ok: true, row: { liters: l.v, cost: c.v, note: (noteEl && noteEl.value.trim()) || null, filled_at: when } };
+}
+
+// Recent fuel entries for a vehicle (also enough rows to total "today").
+async function fetchVehicleFuel(vehicleId) {
+  var res = await window.sb.from('fuel_logs')
+    .select('id, liters, cost, note, filled_at, driver_id, drivers(name)')
+    .eq('vehicle_id', vehicleId)
+    .order('filled_at', { ascending: false })
+    .limit(20);
+  return (res && !res.error && res.data) ? res.data : [];
+}
+
+// The inline "⛽ Fuel" panel body for a manager/admin vehicle card:
+// today's totals, recent entries and an add form.
+function fuelPanelHtml(logs) {
+  var recent = (logs || []).slice(0, 6).map(fuelEntryHtml).join('') ||
+    '<div class="meta muted">No fuel entries yet.</div>';
+  return '<div class="inline-panel" data-panel data-fuel>' +
+    '<h4 class="panel-sub">⛽ Fuel</h4>' +
+    fuelTotalsLine(logs) +
+    '<div class="fuel-list">' + recent + '</div>' +
+    fuelFormHtml() +
+    '<div class="request-actions">' +
+      '<button class="btn btn-primary" type="button" data-action="save-fuel">Add Fuel</button>' +
+      '<button class="btn btn-outline" type="button" data-action="close-fuel">Back</button>' +
+    '</div></div>';
+}
+
 // One muted line with the job's lifecycle times (only the ones set).
 function timesHtml(r) {
   var parts = [];

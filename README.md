@@ -183,6 +183,22 @@ an admin can set a vehicle's odometer directly in the Vehicles section.
 Managers/admins see KM on active jobs, job history and vehicle cards.
 **Outlet users never see KM.**
 
+## Fuel / gas logs
+
+Vehicles have an **append-only** fuel log (`fuel_logs`): each fill-up
+records liters, optional cost, an optional note, the date/time, who
+entered it, and optional driver/job links. **Managers and admins** add
+and view fuel entries from a vehicle's **⛽ Fuel** panel, which shows
+recent entries and **today's total liters and cost** (totals are computed
+on read, never stored — ready for the Stage 3D daily report).
+
+**Drivers** can log fuel only for their **own linked vehicle**, and only
+when an admin has switched it on (Admin → Company Settings →
+*Allow drivers to log fuel*). The switch defaults **off**, and the gate
+is enforced by row-level security — not just by hiding the form. Fuel
+logs are never edited or deleted (a correction is a new entry), company
+data never crosses companies, and **outlet users have no fuel access**.
+
 ## Dispatch selection
 
 Requests can go to **any available driver** (open dispatch, the

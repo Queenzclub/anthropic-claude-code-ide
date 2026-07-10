@@ -545,6 +545,7 @@ function initDriverPage(ctx) {
     // The linked vehicle drives the duty gate and the accept block too.
     renderDuty();
     loadAvailable();
+    loadFuelSection();
   }
 
   async function reportIssue(newStatus, btn) {
@@ -574,6 +575,68 @@ function initDriverPage(ctx) {
 
   document.getElementById('reportServiceDue').addEventListener('click', function (e) { reportIssue('service_due', e.currentTarget); });
   document.getElementById('reportDamaged').addEventListener('click', function (e) { reportIssue('damaged', e.currentTarget); });
+
+  // ---------- Add fuel (gated by the company setting) ----------
+  // Hidden unless the company enabled driver fuel entry AND the driver has
+  // a linked vehicle. RLS enforces both server-side regardless of the UI.
+  var fuelSection = document.getElementById('fuelSection');
+  var fuelForm = document.getElementById('fuelForm');
+  var fuelVehicleEl = document.getElementById('fuelVehicle');
+  var fuelRecentEl = document.getElementById('fuelRecent');
+  var fuelSubmitBtn = document.getElementById('fuelSubmit');
+  var fuelAllowed = false;
+
+  async function loadFuelSection() {
+    var res = await window.sb.from('companies')
+      .select('allow_driver_fuel_entry').eq('id', profile.company_id).maybeSingle();
+    fuelAllowed = !!(res && !res.error && res.data && res.data.allow_driver_fuel_entry);
+    if (!fuelAllowed || !linkedVehicle) { fuelSection.classList.add('hidden'); return; }
+    fuelVehicleEl.textContent = '🚐 ' + linkedVehicle.vehicle_name + ' · ' + linkedVehicle.plate_number;
+    if (!fuelForm.getAttribute('data-built')) {
+      fuelForm.innerHTML = fuelFormHtml();
+      fuelForm.setAttribute('data-built', '1');
+    }
+    var when = fuelForm.querySelector('[data-role="fuel-when"]');
+    if (when && !when.value) when.value = localDatetimeValue();
+    fuelSection.classList.remove('hidden');
+    loadFuelRecent();
+  }
+
+  async function loadFuelRecent() {
+    var res = await window.sb.from('fuel_logs')
+      .select('id, liters, cost, note, filled_at, driver_id, drivers(name)')
+      .eq('driver_id', profile.driver_id).order('filled_at', { ascending: false }).limit(5);
+    var logs = (res && !res.error && res.data) ? res.data : [];
+    fuelRecentEl.innerHTML = logs.length
+      ? '<p class="muted small">Your recent fuel entries</p>' + logs.map(fuelEntryHtml).join('')
+      : '';
+  }
+
+  async function submitFuel() {
+    if (!fuelAllowed || !linkedVehicle) return;
+    var f = readFuelForm(fuelForm);
+    if (!f.ok) { showFlash(f.error, 'error'); return; }
+    fuelSubmitBtn.disabled = true;
+    var row = Object.assign({
+      company_id: profile.company_id,
+      vehicle_id: linkedVehicle.id,
+      driver_id: profile.driver_id,
+      request_id: activeJobs.length ? activeJobs[0].id : null,
+      created_by: profile.user_id,
+    }, f.row);
+    var res = await window.sb.from('fuel_logs').insert(row).select('id');
+    fuelSubmitBtn.disabled = false;
+    if (res.error || !res.data || !res.data.length) {
+      showFlash('Could not save fuel entry. Please try again.', 'error');
+      return;
+    }
+    ['fuel-liters', 'fuel-cost', 'fuel-note'].forEach(function (r) {
+      var el = fuelForm.querySelector('[data-role="' + r + '"]'); if (el) el.value = '';
+    });
+    showFlash('Fuel entry added.', 'success');
+    loadFuelRecent();
+  }
+  fuelSubmitBtn.addEventListener('click', submitFuel);
 
   // ---------- Recent jobs (history) ----------
   // The driver's own completed/cancelled jobs. The vehicle name only
