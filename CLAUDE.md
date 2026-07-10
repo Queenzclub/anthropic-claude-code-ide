@@ -6,9 +6,9 @@ Fleet Board Pro
 
 ## Project Overview
 
-Fleet Board Pro is a vehicle location, delivery request, and fleet status management web app for shop/company operations.
+Fleet Board Pro is a **multi-tenant** vehicle location, delivery request, and fleet status management web app for shop/company operations. It is built to serve many companies on one platform, with every company's users and data strictly isolated (see **Platform Architecture** below).
 
-The app helps outlets, managers, admins, and drivers coordinate vehicle requests, track vehicle availability, and view driver/vehicle location updates.
+The app helps outlets, managers, company admins, and drivers coordinate vehicle requests, track vehicle availability, and view driver/vehicle location updates.
 
 The main purpose is to make vehicle movement clear, fast, and easy to manage.
 
@@ -22,6 +22,30 @@ Build a simple, reliable system where:
 4. Vehicle status updates automatically.
 5. Manager/admin can see which vehicles are available, busy, or offline.
 6. Driver location can be shown on the map when available.
+
+## Platform Architecture
+
+Fleet Board Pro is a multi-tenant fleet and dispatch management platform.
+
+It is not built for only one company.
+
+The platform can support many companies, and every company's users and data must remain strictly isolated using `company_id` and Row Level Security.
+
+Hierarchy:
+
+```
+Fleet Board Pro Platform
+└── Super Admin
+    ├── Company A
+    │   ├── Company Admins
+    │   ├── Managers
+    │   ├── Drivers
+    │   ├── Vehicles
+    │   └── Outlets
+    ├── Company B
+    │   └── Its own isolated users and data
+    └── Additional companies
+```
 
 ## Tech Stack
 
@@ -45,67 +69,109 @@ Prefer small, safe, focused changes.
 
 Before changing important logic, first understand the current structure and explain what will be changed.
 
-## Main User Roles
+## Official Roles
 
-### Admin
+### Super Admin
 
-Admin has full control.
+The Super Admin is the Fleet Board Pro platform owner.
 
-Admin can:
+This role is separate from every company.
 
-* Manage companies
-* Manage outlets
-* Manage vehicles
-* Manage drivers
-* Manage users
-* View all requests
-* View all vehicle statuses
-* View location updates
-* View reports/history
+Super Admin will eventually be able to:
+
+* Create, suspend, reactivate, and manage companies
+* Manage company access or subscription status
+* Create or manage first company administrators through secure server-side functions
+* View platform-wide totals and health information
+* Delete or archive companies and their history through protected workflows
+* Manage platform-level settings and feature access
+
+Super Admin must never use a service_role key in frontend code.
+
+Privileged operations such as creating Auth accounts, changing another user's password, or deleting a company must use secure Supabase Edge Functions or another protected backend.
+
+The Super Admin feature is future work unless explicitly requested.
+
+### Company Admin
+
+The role currently stored internally as `admin` means Company Admin.
+
+A Company Admin can manage only their own company.
+
+Company Admin can:
+
+* Create and manage outlets
+* Create and manage driver records
+* Create and manage vehicles
+* Activate and deactivate company users
+* Assign roles
+* Link outlet accounts to outlets
+* Link driver accounts to drivers and vehicles
+* Manage company settings
+* View company jobs, vehicle status, KM, fuel, service status, and reports
+
+Company Admin cannot:
+
+* View another company
+* Create another company
+* Manage platform subscriptions
+* Access Super Admin functions
 
 ### Manager
 
-Manager controls daily operations.
+Manager handles daily fleet operations for their company.
 
 Manager can:
 
-* View outlet requests
-* Assign or approve jobs
-* See available and busy vehicles
-* See drivers
-* See job history
-* Monitor location updates
-* Cancel or close requests when needed
+* Create manual jobs from any pickup and drop-off location
+* Send open or specifically targeted requests
+* Monitor vehicles and live locations
+* Assign or override jobs
+* View active jobs, history, KM, fuel, vehicle status, and reports
+* Manage operational workflows allowed by company policy
 
-### Outlet / Shop Staff
-
-Outlet staff can request vehicles.
-
-Outlet staff can:
-
-* Create vehicle request
-* Add customer/delivery details
-* Add pickup/drop-off information
-* View request status
-* See whether request is pending, accepted, in progress, completed, or cancelled
-
-Outlet staff should not see admin-only or manager-only data.
+Manager cannot access another company.
 
 ### Driver
 
-Driver handles assigned jobs.
+Every driver has a separate login account and password.
 
-Driver can:
+A driver profile must be linked to:
 
-* View jobs assigned to them
-* Accept a request
-* Start a trip
-* Update status
-* Complete the job
-* Share/update location if enabled
-* Add notes or delivery proof if the feature exists
+* A driver record
+* A company
+* A vehicle before going On Duty
 
-Driver should only see their own assigned jobs and relevant vehicle details.
+Rules:
+
+* A driver without a linked vehicle cannot go On Duty
+* A driver without a linked vehicle cannot receive open requests
+* A driver without a linked vehicle cannot represent or share a vehicle's location
+* On-duty drivers can receive open requests
+* Specifically targeted requests may follow the approved targeted-dispatch rules
+* Drivers can carry multiple active jobs
+* Drivers only see their own assigned or claimable jobs
+* Drivers only update their own duty, location, KM, and permitted fuel information
+
+### Outlet
+
+Every outlet/shop has its own separate login account and password.
+
+An outlet account is linked to exactly one outlet record.
+
+Outlet can:
+
+* Create vehicle requests
+* Send requests to any available driver or a specific available driver
+* Track only vehicles handling its own active deliveries
+* View its own request history and completion notifications
+
+Outlet cannot:
+
+* View other outlets' requests
+* View all company vehicles
+* View KM, fuel, service, or internal audit information
+* Access another company
 
 ## Company System
 
@@ -131,6 +197,16 @@ Never mix data between companies.
 
 All important tables should be linked to company_id or company code.
 
+## Multi-Tenant Rules
+
+* Every operational table must remain scoped by company_id where applicable.
+* Company A must never see or edit Company B data.
+* Frontend hiding is not security.
+* Sensitive access must be enforced by Supabase RLS, database functions, triggers, and secure backend functions.
+* Never weaken company separation for convenience.
+* Every user account must have its own email/login and password.
+* Do not share one login across multiple outlets, drivers, or managers.
+
 ## Vehicle Status Logic
 
 Vehicle status is very important.
@@ -142,6 +218,9 @@ available
 busy
 offline
 maintenance
+service_due
+in_service
+damaged
 ```
 
 Basic rules:
@@ -154,6 +233,17 @@ Basic rules:
 * When location has not updated for a long time, the app may show vehicle as offline.
 
 Do not leave a vehicle stuck as busy after job completion or cancellation.
+
+## Driver and Vehicle Rules
+
+* A driver must be linked to a vehicle before going On Duty.
+* Going On Duty should be blocked when no active vehicle is linked.
+* The UI should show: "No vehicle assigned. Please contact your company admin."
+* A vehicle may carry multiple active jobs.
+* A vehicle remains busy while at least one accepted or in-progress job exists.
+* A vehicle becomes available only after the last active job is completed or cancelled.
+* Maintenance, In Service, and Damaged vehicles are not dispatchable.
+* Service Due is advisory unless business rules later change.
 
 ## Request / Job Status Logic
 
@@ -268,6 +358,18 @@ active
 ```
 
 Do not rely only on frontend hiding. Sensitive data must also be protected in the database.
+
+## Security Rules
+
+* Never expose Supabase service_role in frontend files.
+* The browser may use only the public anon key.
+* Super Admin and account-management operations requiring elevated privileges must use secure Edge Functions.
+* Company Admin must never gain platform-wide access.
+* Password changes:
+  * Users may change their own password through Supabase Auth.
+  * Changing another user's password requires a secure server-side operation.
+* Prefer deactivate/archive over destructive deletion.
+* Hard deletion of companies or history requires explicit confirmation and a protected backend workflow.
 
 ## Database Guidelines
 
@@ -605,6 +707,18 @@ The app should be:
 5. Protected by roles
 6. Mobile-friendly
 7. Easy to maintain
+
+## Future Work Order
+
+Keep these as future stages:
+
+1. Daily Vehicle Reports and analytics
+2. Super Admin / platform-owner system
+3. Secure Auth-user creation and password-management Edge Functions
+4. Remaining operational features
+5. Final UI/UX redesign as the last stage
+
+The final UI/UX redesign must remain last, after all main features and workflows are finished and tested.
 
 ## Final Reminder
 
