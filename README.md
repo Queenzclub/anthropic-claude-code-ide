@@ -199,6 +199,34 @@ is enforced by row-level security — not just by hiding the form. Fuel
 logs are never edited or deleted (a correction is a new entry), company
 data never crosses companies, and **outlet users have no fuel access**.
 
+## Reports (daily / date-range analytics)
+
+**Company admins and managers** get a **📈 Reports** section on their
+dashboard. Drivers and outlet users have no Reports section at all. It
+calls one company-scoped, staff-guarded database function
+(`company_report`) and shows, for a chosen range:
+
+- **Presets** — Today (the default), Yesterday, Last 7 Days, This Month,
+  or a **Custom** from/to range (max 366 days). A one-year range is never
+  loaded automatically.
+- **Filters** — by **vehicle** and by **driver**. A separate **Recent
+  Jobs Status** filter narrows only the recent-jobs list, never the
+  totals (a fuel-only entry has no job status, so a single status would
+  make the other counts misleading).
+- **For the selected range** — requests created, accepted, completed,
+  cancelled, **Completion rate (of closed jobs)**, total KM, fuel litres
+  and cost, and average delivery / request→accept / accepted→start times.
+- **Right now** — a clearly separate current snapshot: pending and active
+  jobs, drivers on duty, and a live count of every vehicle status.
+- **Per-vehicle and per-driver** tables, plus a **Recent jobs** table.
+
+Date boundaries are computed in the **company's timezone** in the
+database, so "Today" is correct regardless of the viewer's device.
+Missing rates and averages show as **—**. Inactive drivers/vehicles still
+appear when they had activity in the range (flagged *inactive*). Wide
+tables scroll sideways inside their own container so the page stays
+mobile-friendly.
+
 ## Dispatch selection
 
 Requests can go to **any available driver** (open dispatch, the
