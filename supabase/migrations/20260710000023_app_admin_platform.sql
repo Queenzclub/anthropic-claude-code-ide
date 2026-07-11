@@ -58,7 +58,7 @@ create index if not exists companies_status_idx on public.companies (status);
 create or replace function app.sync_company_active()
 returns trigger
 language plpgsql
-set search_path = pg_catalog, public
+set search_path = pg_catalog
 as $$
 begin
   new.active := (new.status = 'active');
@@ -78,7 +78,7 @@ update public.companies set status = status;
 --         while the caller's company status = 'active'. app_admin (company
 --         NULL) still resolves to NULL, exactly as before. ----
 create or replace function app.my_company_id()
-returns uuid language sql stable security definer set search_path = public as $$
+returns uuid language sql stable security definer set search_path = pg_catalog as $$
   select p.company_id
   from public.profiles p
   join public.companies c on c.id = p.company_id
@@ -86,7 +86,7 @@ returns uuid language sql stable security definer set search_path = public as $$
 $$;
 
 create or replace function app.my_driver_id()
-returns uuid language sql stable security definer set search_path = public as $$
+returns uuid language sql stable security definer set search_path = pg_catalog as $$
   select p.driver_id
   from public.profiles p
   join public.companies c on c.id = p.company_id
@@ -94,7 +94,7 @@ returns uuid language sql stable security definer set search_path = public as $$
 $$;
 
 create or replace function app.my_outlet_id()
-returns uuid language sql stable security definer set search_path = public as $$
+returns uuid language sql stable security definer set search_path = pg_catalog as $$
   select p.outlet_id
   from public.profiles p
   join public.companies c on c.id = p.company_id
@@ -102,7 +102,7 @@ returns uuid language sql stable security definer set search_path = public as $$
 $$;
 
 create or replace function app.my_vehicle_id()
-returns uuid language sql stable security definer set search_path = public as $$
+returns uuid language sql stable security definer set search_path = pg_catalog as $$
   select coalesce(
     (select p.vehicle_id from public.profiles p
        join public.companies c on c.id = p.company_id
@@ -114,7 +114,7 @@ $$;
 
 -- ---- 5) app_admin identity ----
 create or replace function app.is_app_admin()
-returns boolean language sql stable security definer set search_path = public as $$
+returns boolean language sql stable security definer set search_path = pg_catalog as $$
   select exists (
     select 1 from public.profiles
     where user_id = auth.uid() and active and role::text = 'app_admin');
@@ -122,20 +122,24 @@ $$;
 grant execute on function app.is_app_admin() to authenticated;
 
 -- ---- 6) Role-escalation protection for app_admin ----
--- SECURITY INVOKER so current_user reflects the real caller role. Only a
--- trusted DB role (SQL Editor / postgres / service_role — NOT the browser's
--- authenticated/anon) or an existing active app_admin may create, remove or
--- edit an app_admin profile. Ordinary Company Admin/Manager/Driver/Outlet
--- (and self-service) are blocked. Enforces the invariant that an app_admin
--- profile has company_id IS NULL. This is a NEW trigger; the existing
--- protect_profile_fields is unchanged.
+-- SECURITY INVOKER so current_user/session_user reflect the real caller.
+-- Only the trusted manual context (the Supabase SQL Editor / migration
+-- runner, which is the postgres LOGIN role — verified: current_user AND
+-- session_user are both 'postgres') or an existing active app_admin may
+-- create, remove or edit an app_admin profile. This deliberately EXCLUDES
+-- service_role (session_user='authenticator') and every browser role
+-- (authenticated/anon). Ordinary Company Admin/Manager/Driver/Outlet and
+-- self-service are blocked. Enforces the invariant that an app_admin
+-- profile has company_id IS NULL. NEW trigger; protect_profile_fields is
+-- unchanged. (Granting/revoking app_admin to OTHERS at runtime is reserved
+-- for a future explicitly-protected RPC, not broad direct UPDATE access.)
 create or replace function app.protect_app_admin_role()
 returns trigger
 language plpgsql
-set search_path = pg_catalog, public
+set search_path = pg_catalog
 as $$
 declare
-  v_trusted   boolean := (current_user not in ('authenticated', 'anon'));
+  v_trusted   boolean := (current_user = 'postgres' and session_user = 'postgres');
   v_is_appadm boolean := app.is_app_admin();
   v_involves  boolean;
 begin
@@ -169,7 +173,7 @@ create trigger profiles_protect_app_admin
 --         their own company's status. ----
 create or replace function public.my_account_access()
 returns jsonb
-language sql stable security definer set search_path = pg_catalog, public as $$
+language sql stable security definer set search_path = pg_catalog as $$
   select jsonb_build_object(
     'user_id',            p.user_id,
     'role',               p.role,
@@ -215,7 +219,7 @@ create policy platform_audit_select_appadmin on public.platform_audit_log
 
 -- Immutability: reject any UPDATE/DELETE on audit rows.
 create or replace function app.platform_audit_immutable()
-returns trigger language plpgsql set search_path = pg_catalog, public as $$
+returns trigger language plpgsql set search_path = pg_catalog as $$
 begin
   raise exception 'platform_audit_log is append-only';
 end;
@@ -245,7 +249,7 @@ create policy fuel_select_appadmin             on public.fuel_logs        for se
 
 -- suspend
 create or replace function public.suspend_company(p_company uuid, p_reason text)
-returns jsonb language plpgsql security definer set search_path = pg_catalog, public as $$
+returns jsonb language plpgsql security definer set search_path = pg_catalog as $$
 declare v_actor uuid := auth.uid(); v_row public.companies;
 begin
   if not app.is_app_admin() then raise exception 'Not allowed'; end if;
@@ -253,6 +257,10 @@ begin
   if p_reason is null or btrim(p_reason) = '' then raise exception 'A suspension reason is required'; end if;
   select * into v_row from public.companies where id = p_company;
   if not found then raise exception 'Company not found'; end if;
+  -- Transition: only an ACTIVE company can be suspended.
+  if v_row.status <> 'active' then
+    raise exception 'Only an active company can be suspended (current status: %)', v_row.status;
+  end if;
 
   update public.companies
      set status = 'suspended', suspended_at = now(), suspended_by = v_actor,
@@ -260,7 +268,8 @@ begin
    where id = p_company;
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, details)
-  values (v_actor, 'company_suspended', p_company, jsonb_build_object('reason', btrim(p_reason)));
+  values (v_actor, 'company_suspended', p_company,
+          jsonb_build_object('prev_status', v_row.status, 'new_status', 'suspended', 'reason', btrim(p_reason)));
 
   return jsonb_build_object('id', p_company, 'status', 'suspended');
 end;
@@ -268,20 +277,27 @@ $$;
 
 -- reactivate (suspended -> active)
 create or replace function public.reactivate_company(p_company uuid)
-returns jsonb language plpgsql security definer set search_path = pg_catalog, public as $$
+returns jsonb language plpgsql security definer set search_path = pg_catalog as $$
 declare v_actor uuid := auth.uid(); v_row public.companies;
 begin
   if not app.is_app_admin() then raise exception 'Not allowed'; end if;
   if p_company is null then raise exception 'A target company is required'; end if;
   select * into v_row from public.companies where id = p_company;
   if not found then raise exception 'Company not found'; end if;
+  -- Transition: reactivate ONLY from suspended. archived uses
+  -- restore_archived_company; pending_setup activation is reserved for the
+  -- Stage 4B onboarding workflow and never happens here.
+  if v_row.status <> 'suspended' then
+    raise exception 'Only a suspended company can be reactivated (current status: %)', v_row.status;
+  end if;
 
   update public.companies
      set status = 'active', suspended_at = null, suspended_by = null, suspension_reason = null
    where id = p_company;
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, details)
-  values (v_actor, 'company_reactivated', p_company, jsonb_build_object('from', v_row.status));
+  values (v_actor, 'company_reactivated', p_company,
+          jsonb_build_object('prev_status', v_row.status, 'new_status', 'active'));
 
   return jsonb_build_object('id', p_company, 'status', 'active');
 end;
@@ -289,7 +305,7 @@ $$;
 
 -- archive (reversible; requires reason)
 create or replace function public.archive_company(p_company uuid, p_reason text)
-returns jsonb language plpgsql security definer set search_path = pg_catalog, public as $$
+returns jsonb language plpgsql security definer set search_path = pg_catalog as $$
 declare v_actor uuid := auth.uid(); v_row public.companies;
 begin
   if not app.is_app_admin() then raise exception 'Not allowed'; end if;
@@ -297,13 +313,19 @@ begin
   if p_reason is null or btrim(p_reason) = '' then raise exception 'An archive reason is required'; end if;
   select * into v_row from public.companies where id = p_company;
   if not found then raise exception 'Company not found'; end if;
+  -- Transition: archive ONLY from active or suspended (not already archived,
+  -- not pending_setup).
+  if v_row.status not in ('active', 'suspended') then
+    raise exception 'Only an active or suspended company can be archived (current status: %)', v_row.status;
+  end if;
 
   update public.companies
      set status = 'archived', archived_at = now(), archived_by = v_actor
    where id = p_company;
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, details)
-  values (v_actor, 'company_archived', p_company, jsonb_build_object('reason', btrim(p_reason), 'from', v_row.status));
+  values (v_actor, 'company_archived', p_company,
+          jsonb_build_object('prev_status', v_row.status, 'new_status', 'archived', 'reason', btrim(p_reason)));
 
   return jsonb_build_object('id', p_company, 'status', 'archived');
 end;
@@ -311,21 +333,25 @@ $$;
 
 -- restore (archived -> active)
 create or replace function public.restore_archived_company(p_company uuid)
-returns jsonb language plpgsql security definer set search_path = pg_catalog, public as $$
+returns jsonb language plpgsql security definer set search_path = pg_catalog as $$
 declare v_actor uuid := auth.uid(); v_row public.companies;
 begin
   if not app.is_app_admin() then raise exception 'Not allowed'; end if;
   if p_company is null then raise exception 'A target company is required'; end if;
   select * into v_row from public.companies where id = p_company;
   if not found then raise exception 'Company not found'; end if;
-  if v_row.status <> 'archived' then raise exception 'Company is not archived'; end if;
+  -- Transition: restore ONLY from archived.
+  if v_row.status <> 'archived' then
+    raise exception 'Only an archived company can be restored (current status: %)', v_row.status;
+  end if;
 
   update public.companies
      set status = 'active', archived_at = null, archived_by = null
    where id = p_company;
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, details)
-  values (v_actor, 'company_restored', p_company, jsonb_build_object('from', 'archived'));
+  values (v_actor, 'company_restored', p_company,
+          jsonb_build_object('prev_status', v_row.status, 'new_status', 'active'));
 
   return jsonb_build_object('id', p_company, 'status', 'active');
 end;
@@ -343,7 +369,8 @@ begin
   with cos as (select * from public.companies),
   comp as (
     select
-      count(*) filter (where status <> 'archived')                    total,
+      count(*)                                                        total,          -- ALL companies (incl. archived)
+      count(*) filter (where status <> 'archived')                    non_archived,
       count(*) filter (where status = 'active')                       active,
       count(*) filter (where status = 'suspended')                    suspended,
       count(*) filter (where status = 'pending_setup')                pending_setup,
@@ -379,8 +406,11 @@ begin
   )
   select jsonb_build_object(
     'companies', jsonb_build_object(
-        'total', (select total from comp), 'active', (select active from comp),
-        'suspended', (select suspended from comp), 'pending_setup', (select pending_setup from comp),
+        'total', (select total from comp),                 -- all, including archived
+        'non_archived', (select non_archived from comp),
+        'active', (select active from comp),
+        'suspended', (select suspended from comp),
+        'pending_setup', (select pending_setup from comp),
         'archived', (select archived from comp)),
     'totals', jsonb_build_object(
         'company_admins', (select company_admins from prof), 'managers', (select managers from prof),
@@ -411,11 +441,34 @@ begin
         'suspended_at', v_row.suspended_at, 'suspension_reason', v_row.suspension_reason,
         'archived_at', v_row.archived_at,
         'allow_driver_fuel_entry', v_row.allow_driver_fuel_entry),
-    'staff', (
+    -- Read-only lists (safe operational fields only; no email / auth secrets).
+    'company_admins', (
+      select coalesce(jsonb_agg(jsonb_build_object('user_id', user_id, 'name', name, 'active', active) order by name), '[]'::jsonb)
+      from public.profiles where company_id = p_company and role::text = 'admin'),
+    'managers', (
+      select coalesce(jsonb_agg(jsonb_build_object('user_id', user_id, 'name', name, 'active', active) order by name), '[]'::jsonb)
+      from public.profiles where company_id = p_company and role::text = 'manager'),
+    'drivers', (
       select coalesce(jsonb_agg(jsonb_build_object(
-               'user_id', user_id, 'name', name, 'email', email, 'role', role, 'active', active)
-               order by role, name), '[]'::jsonb)
-      from public.profiles where company_id = p_company and role::text in ('admin','manager')),
+               'id', d.id, 'name', d.name, 'active', d.active, 'on_duty', d.on_duty,
+               'vehicle_name', vv.vehicle_name, 'vehicle_plate', vv.plate_number) order by d.name), '[]'::jsonb)
+      from public.drivers d
+      left join lateral (
+        select vehicle_name, plate_number from public.vehicles
+        where driver_id = d.id and active order by created_at limit 1
+      ) vv on true
+      where d.company_id = p_company),
+    'outlets', (
+      select coalesce(jsonb_agg(jsonb_build_object('id', id, 'name', name, 'active', active) order by name), '[]'::jsonb)
+      from public.outlets where company_id = p_company),
+    'vehicles', (
+      select coalesce(jsonb_agg(jsonb_build_object(
+               'id', v.id, 'vehicle_name', v.vehicle_name, 'plate_number', v.plate_number,
+               'status', v.status, 'current_km', v.current_km, 'active', v.active,
+               'driver_name', dr.name) order by v.vehicle_name), '[]'::jsonb)
+      from public.vehicles v
+      left join public.drivers dr on dr.id = v.driver_id
+      where v.company_id = p_company),
     'counts', jsonb_build_object(
         'drivers',  (select count(*) from public.drivers  where company_id = p_company),
         'outlets',  (select count(*) from public.outlets  where company_id = p_company),

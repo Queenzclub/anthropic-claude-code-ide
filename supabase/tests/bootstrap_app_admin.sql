@@ -1,22 +1,34 @@
 -- ============================================================
 -- Fleet Board Pro — FIRST app_admin bootstrap (TEMPLATE)
 --
--- Run ONCE, manually, in the Supabase SQL Editor, AFTER Migration 23 is
--- applied. This is the ONLY supported way to create the first platform
--- owner: there is no signup path, no in-app path, and ordinary Company
--- Admin / Manager users are blocked by the profiles_protect_app_admin
--- trigger. The SQL Editor runs as a trusted role (postgres), which is what
--- the trigger permits for this operation.
+-- Run ONCE, manually, in the Supabase SQL Editor, as part of this order:
+--   1. Apply Migration 23.
+--   2. Run verify_migration_23.sql Part A (structure & grants).
+--   3. Create a SEPARATE, dedicated Supabase Auth account for the platform
+--      owner (Authentication → Add user) — e.g. platform@yourdomain. Do NOT
+--      reuse a Company Admin login.
+--   4. Confirm that account now has a row in public.profiles
+--      (select user_id, role from public.profiles where email = '<that email>').
+--   5. Run THIS template for that separate account (fill in its email).
+--   6. Verify role = app_admin, company_id IS NULL, active = true.
+--   7. Run verify_migration_23.sql Part B (app_admin + ordinary-role blocks).
 --
--- Prerequisites:
---   1. The person already has a Supabase Auth account (they signed up /
---      were added in Authentication → Users) and therefore a row in
---      public.profiles.
---   2. Replace the placeholder email below with THEIR real login email.
+-- WHY A SEPARATE ACCOUNT: promoting a company's only Company Admin turns
+-- that account into a platform owner (company_id becomes NULL), leaving the
+-- company with NO administrator. Always use a dedicated app_admin login.
+--
+-- This is the ONLY supported way to create the first platform owner: there
+-- is no signup path and no in-app path. The profiles_protect_app_admin
+-- trigger permits this change ONLY from the trusted manual context — the
+-- Supabase SQL Editor / migration runner, where current_user AND
+-- session_user are both 'postgres'. It deliberately does NOT permit
+-- service_role or any authenticated/anon (browser) role to assign or remove
+-- app_admin. (Confirm your editor context first: select current_user,
+-- session_user;  -> expect  postgres | postgres.)
 --
 -- This template contains NO real UUID or email — fill it in at run time.
--- It is wrapped in a transaction with a safety check and writes an audit
--- row (actor_user_id is NULL: a trusted SQL-Editor bootstrap has no
+-- It is wrapped in a transaction with safety checks and writes an audit row
+-- (actor_user_id is NULL: a trusted SQL-Editor bootstrap has no
 -- authenticated platform actor).
 -- ============================================================
 
