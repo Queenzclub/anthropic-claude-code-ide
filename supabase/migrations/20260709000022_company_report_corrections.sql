@@ -195,9 +195,11 @@ begin
       and filled_at >= v_start and filled_at < v_end
     group by vehicle_id
   ),
-  veh_used as (   -- vehicles with activity shown in the range
-    select vehicle_id from veh_roll where completed > 0 or cancelled > 0
-    union select vehicle_id from veh_fuel
+  veh_used as (   -- vehicles with ANY in-range activity (any lifecycle
+                  -- timestamp in `win`, incl. in-progress jobs), plus fuel
+    select distinct vehicle_id from win where vehicle_id is not null
+    union
+    select distinct vehicle_id from veh_fuel
   ),
   vehicles_arr as (
     select coalesce(jsonb_agg(jsonb_build_object(
@@ -245,8 +247,17 @@ begin
                 and started_at is not null and completed_at >= started_at))::bigint avg_del
     from win where driver_id is not null group by driver_id
   ),
-  drv_used as (   -- drivers with activity shown in the range
-    select driver_id from drv_roll where accepted > 0 or completed > 0 or cancelled > 0
+  drv_used as (   -- drivers with ANY in-range activity (any lifecycle
+                  -- timestamp in `win`, incl. in-progress jobs), plus a
+                  -- driver-linked fuel entry in range
+    select distinct driver_id from win where driver_id is not null
+    union
+    select distinct driver_id from public.fuel_logs
+    where company_id = v_company
+      and driver_id is not null
+      and filled_at >= v_start and filled_at < v_end
+      and (p_vehicle is null or vehicle_id = p_vehicle)
+      and (p_driver  is null or driver_id  = p_driver)
   ),
   drivers_arr as (
     select coalesce(jsonb_agg(jsonb_build_object(
