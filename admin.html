@@ -35,6 +35,13 @@
         <div id="overviewStats" class="stats"></div>
       </section>
 
+      <section id="reportsSection" style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>📈 Reports</h3>
+        </div>
+        <div id="reportHost"></div>
+      </section>
+
       <section id="settingsSection" style="margin-top: 1.75rem;">
         <div class="section-head">
           <h3>⚙️ Company Settings</h3>
@@ -113,8 +120,9 @@
   <script src="js/auth.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/admin.js"></script>
+  <script src="js/reports.js"></script>
   <script>
-    initDashboard('admin').then(function (ctx) { if (ctx) initAdminPage(ctx); });
+    initDashboard('admin').then(function (ctx) { if (ctx) { initAdminPage(ctx); initReports(ctx); } });
   </script>
   <script src="js/pwa.js"></script>
 </body>

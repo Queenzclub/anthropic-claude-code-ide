@@ -674,3 +674,78 @@ body.ready .loader { display: none; }
   #vehicleMap, #trackMap { height: 260px; }
   .request-actions .btn { min-width: 110px; }
 }
+
+/* ---------- Reports (Stage 3D) ---------- */
+
+.report-filters {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+  align-items: end;
+}
+@media (max-width: 640px) {
+  .report-filters { grid-template-columns: 1fr 1fr; }
+}
+.report-filters .field { margin-bottom: 0; }
+.report-dates { display: flex; gap: 0.5rem; grid-column: 1 / -1; }
+.report-dates label { font-size: 0.8rem; color: var(--muted); display: block; }
+.report-run { display: flex; align-items: flex-end; }
+.report-run .btn { width: 100%; }
+
+.report-body { margin-top: 1rem; }
+.report-loading { color: var(--muted); padding: 1rem 0; }
+.report-range { margin: 0 0 0.75rem; font-size: 0.9rem; }
+
+.report-block { margin-top: 1.5rem; }
+.report-h {
+  font-size: 0.95rem;
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+/* "Right now" gets a subtle tint to separate it from date-range metrics. */
+.report-now {
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem;
+}
+
+.report-vehstatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.now-chip {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+.now-chip .now-n { font-weight: 700; color: var(--text, #e8eefc); }
+
+/* Practical tables on mobile: keep the page from scrolling sideways by
+   scrolling wide tables inside their own container. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+  min-width: 520px;
+}
+.report-table th, .report-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  vertical-align: top;
+}
+.report-table th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+.report-table tbody tr:last-child td { border-bottom: none; }
