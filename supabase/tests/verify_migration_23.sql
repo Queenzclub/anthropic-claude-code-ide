@@ -183,6 +183,63 @@ begin
 end $$;
 reset role; rollback;
 
+-- ---------- B-APPADMIN-ROLE-GUARD: only postgres/postgres may change app_admin ----------
+-- protect_app_admin_role() authorizes app_admin profile writes on the trusted
+-- SQL-Editor / migration context ALONE (current_user=session_user='postgres').
+-- is_app_admin() being true does NOT authorize — runtime app_admin grant/revoke
+-- is reserved for a future protected RPC. These all roll back.
+
+-- (a) the SQL Editor (postgres/postgres) CAN bootstrap an app_admin. We promote
+-- an existing ordinary profile in a rolled-back tx — no data change persists.
+begin;
+do $$ begin   -- runs as the editor role: current_user=session_user=postgres
+  update public.profiles
+     set role='app_admin', company_id=null, driver_id=null, vehicle_id=null, outlet_id=null
+   where user_id='REPLACE_DRIVER_UUID';
+  if not (select role::text='app_admin' and company_id is null
+            from public.profiles where user_id='REPLACE_DRIVER_UUID')
+    then raise exception 'FAIL: postgres/postgres bootstrap did not promote'; end if;
+  raise notice 'PASS B-APPADMIN-BOOTSTRAP: postgres/postgres can create an app_admin';
+end $$;
+rollback;
+
+-- (b) service_role — even carrying an app_admin JWT subject — cannot assign OR
+-- remove app_admin (this is exactly the path the old is_app_admin() branch let
+-- through). service_role bypasses RLS and has table grants, so the trigger is
+-- the only thing stopping it.
+begin;
+set local role service_role;
+select set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+do $$
+declare v_mgr_company uuid;
+begin
+  select company_id into v_mgr_company from public.profiles where user_id='REPLACE_MANAGER_UUID';
+  begin
+    update public.profiles set role='app_admin', company_id=null where user_id='REPLACE_MANAGER_UUID';
+    raise exception 'FAIL: service_role assigned app_admin';
+  exception when others then if position('app_admin profile' in sqlerrm)=0 then raise; end if; end;
+  begin
+    update public.profiles set role='manager', company_id=v_mgr_company where user_id='REPLACE_APP_ADMIN_UUID';
+    raise exception 'FAIL: service_role removed app_admin';
+  exception when others then if position('app_admin profile' in sqlerrm)=0 then raise; end if; end;
+  raise notice 'PASS B-APPADMIN-SERVICE: service_role (even with app_admin JWT) cannot assign or remove app_admin';
+end $$;
+reset role; rollback;
+
+-- (c) an AUTHENTICATED app_admin cannot edit even its OWN profile by direct DML
+-- (profiles_update_own exposes the row, so the write reaches the trigger).
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+do $$ begin
+  begin
+    update public.profiles set name='Renamed' where user_id='REPLACE_APP_ADMIN_UUID';
+    raise exception 'FAIL: authenticated app_admin edited its own profile';
+  exception when others then if position('app_admin profile' in sqlerrm)=0 then raise; end if; end;
+  raise notice 'PASS B-APPADMIN-SELF: authenticated app_admin cannot edit its own app_admin profile';
+end $$;
+reset role; rollback;
+
 -- ---------- B-LIFECYCLE-ADMIN: Company Admin cannot touch lifecycle columns ----------
 -- companies_admin_update lets a Company Admin update its OWN company row, so
 -- without the guard trigger it could set status/active/etc. directly and skip
@@ -367,6 +424,41 @@ begin
   begin perform public.restore_archived_company(v_company); raise exception 'FAIL: restore active allowed';
   exception when others then if position('archived company can be restored' in sqlerrm)=0 then raise; end if; end;
   raise notice 'PASS B-ARCHIVE: archive blocks + hides from default, include_archived shows, restore works, transitions enforced';
+end $$;
+reset role; rollback;
+
+-- ---------- B-ARCHIVE-FROM-SUSPENDED: restore clears stale suspension metadata ----------
+-- A company can be archived from suspended. Restoring it must yield a fully
+-- clean active row — suspension metadata cleared too, not just archive fields.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+do $$
+declare v_company uuid;
+begin
+  select company_id into v_company from public.profiles where user_id='REPLACE_COMPANY_ADMIN_UUID';
+  perform public.suspend_company(v_company, 'susp-before-archive');
+  perform public.archive_company(v_company, 'arch-from-suspended');
+  -- archive itself does NOT clear suspension metadata (it is carried into archived)
+  if (select suspension_reason from public.companies where id=v_company) is distinct from 'susp-before-archive'
+    then raise exception 'FAIL: suspension metadata lost before restore'; end if;
+  perform public.restore_archived_company(v_company);
+  if not (select status='active' and active=true
+            and suspended_at is null and suspended_by is null and suspension_reason is null
+            and archived_at is null and archived_by is null
+          from public.companies where id=v_company)
+    then raise exception 'FAIL: restore left stale metadata: %',
+      (select row(status,active,suspended_at,suspended_by,suspension_reason,archived_at,archived_by)
+         from public.companies where id=v_company); end if;
+  -- history preserved in the audit log
+  if not exists (select 1 from public.platform_audit_log where target_company_id=v_company
+                   and action='company_suspended' and details->>'reason'='susp-before-archive')
+     or not exists (select 1 from public.platform_audit_log where target_company_id=v_company
+                   and action='company_archived' and details->>'prev_status'='suspended')
+     or not exists (select 1 from public.platform_audit_log where target_company_id=v_company
+                   and action='company_restored' and details->>'prev_status'='archived')
+    then raise exception 'FAIL: audit trail incomplete for suspend->archive->restore'; end if;
+  raise notice 'PASS B-ARCHIVE-FROM-SUSPENDED: restore clears suspension+archive metadata; audit preserves prev statuses+reason';
 end $$;
 reset role; rollback;
 

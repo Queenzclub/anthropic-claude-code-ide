@@ -175,16 +175,20 @@ create trigger companies_protect_lifecycle
 
 -- ---- 6) Role-escalation protection for app_admin ----
 -- SECURITY INVOKER so current_user/session_user reflect the real caller.
--- Only the trusted manual context (the Supabase SQL Editor / migration
--- runner, which is the postgres LOGIN role — verified: current_user AND
--- session_user are both 'postgres') or an existing active app_admin may
--- create, remove or edit an app_admin profile. This deliberately EXCLUDES
--- service_role (session_user='authenticator') and every browser role
--- (authenticated/anon). Ordinary Company Admin/Manager/Driver/Outlet and
--- self-service are blocked. Enforces the invariant that an app_admin
--- profile has company_id IS NULL. NEW trigger; protect_profile_fields is
--- unchanged. (Granting/revoking app_admin to OTHERS at runtime is reserved
--- for a future explicitly-protected RPC, not broad direct UPDATE access.)
+-- ONLY the trusted manual context — the Supabase SQL Editor / migration
+-- runner, which is the postgres LOGIN role (verified: current_user AND
+-- session_user are both 'postgres') — may create, remove or edit an
+-- app_admin profile. Nothing else qualifies: an existing active app_admin
+-- is NOT allowed to change app_admin profiles by direct DML (runtime
+-- grant/revoke of app_admin is reserved for a future explicitly-protected
+-- RPC, which will add its own transaction-local marker when Stage 4B builds
+-- it — mirroring the lifecycle-RPC design). This deliberately EXCLUDES
+-- service_role (session_user='authenticator'), including a service_role
+-- request carrying an app_admin's JWT subject, and every browser role
+-- (authenticated/anon), including an authenticated app_admin. Ordinary
+-- Company Admin/Manager/Driver/Outlet and self-service are blocked too.
+-- Enforces the invariant that an app_admin profile has company_id IS NULL.
+-- NEW trigger; protect_profile_fields is unchanged.
 create or replace function app.protect_app_admin_role()
 returns trigger
 language plpgsql
@@ -192,7 +196,6 @@ set search_path = pg_catalog
 as $$
 declare
   v_trusted   boolean := (current_user = 'postgres' and session_user = 'postgres');
-  v_is_appadm boolean := app.is_app_admin();
   v_involves  boolean;
 begin
   -- Invariant: an app_admin profile must not belong to a company.
@@ -205,7 +208,9 @@ begin
   v_involves := (new.role::text = 'app_admin')
              or (tg_op = 'UPDATE' and old.role::text = 'app_admin');
 
-  if v_involves and not (v_trusted or v_is_appadm) then
+  -- Only the trusted SQL-Editor / migration context may do so. is_app_admin()
+  -- is intentionally NOT consulted here.
+  if v_involves and not v_trusted then
     raise exception 'Not allowed to assign, remove, or modify an app_admin profile';
   end if;
 
@@ -404,9 +409,15 @@ begin
     raise exception 'Only an archived company can be restored (current status: %)', v_row.status;
   end if;
 
+  -- Restore to a clean active row. A company can be archived from either
+  -- active OR suspended, so also clear any stale suspension metadata that
+  -- was carried into the archived state — otherwise a restored company would
+  -- look active while still holding a suspended_at/by/reason. The prior
+  -- suspension and archive history stays preserved in platform_audit_log.
   perform set_config('app.lifecycle_rpc', 'on', true);
   update public.companies
-     set status = 'active', archived_at = null, archived_by = null
+     set status = 'active', archived_at = null, archived_by = null,
+         suspended_at = null, suspended_by = null, suspension_reason = null
    where id = p_company;
   perform set_config('app.lifecycle_rpc', 'off', true);
 
