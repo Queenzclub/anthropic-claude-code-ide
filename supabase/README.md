@@ -62,6 +62,27 @@ set company_id = (select id from public.companies where code = 'GLOW2026'),
 where email = 'driver@example.com';
 ```
 
+### 4. Super Admin (app_admin) — platform owner
+
+The platform-owner role `app_admin` is added by Migration 23 and is created
+**only** by a manual, trusted bootstrap — there is no signup or in-app path,
+and ordinary Company Admins cannot grant it. Order:
+
+1. Apply Migration 23.
+2. Run `tests/verify_migration_23.sql` **Part A** (structure & grants).
+3. Create a **separate, dedicated** Supabase Auth account for the platform
+   owner (Authentication → Add user) — do **not** reuse a Company Admin
+   login, or that company would be left without an administrator.
+4. Confirm that account has a `public.profiles` row.
+5. Run `tests/bootstrap_app_admin.sql` (fill in that account's email).
+6. Verify `role = app_admin`, `company_id IS NULL`, `active = true`.
+7. Run `tests/verify_migration_23.sql` **Part B** (app_admin + ordinary-role
+   impersonation blocks) with real UUIDs.
+
+The bootstrap works only in the SQL Editor (where `current_user` and
+`session_user` are both `postgres`); `service_role` and browser roles are
+rejected by the `profiles_protect_app_admin` trigger.
+
 ## Testing the schema locally
 
 `tests/smoke_test.sql` verifies the whole security model on a throwaway

@@ -749,3 +749,33 @@ body.ready .loader { display: none; }
   font-size: 0.8rem;
 }
 .report-table tbody tr:last-child td { border-bottom: none; }
+
+/* ---------- Stage 4A: Platform Admin + suspended-company screen ---------- */
+.toggle-inline { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--muted); cursor: pointer; }
+.toggle-inline input { width: 18px; height: 18px; flex: none; }
+
+.btn-warn { background: var(--amber, #f0a020); color: #1a1205; }
+.btn-warn:hover:not(:disabled) { filter: brightness(1.05); }
+
+.company-card .card-top { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.company-card .card-top strong { font-size: 1.05rem; }
+
+.detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.5rem; }
+.detail-head h4 { margin: 0 0 0.15rem; font-size: 1.15rem; }
+.detail-note { margin: 0.35rem 0; color: var(--muted); font-size: 0.9rem; }
+.detail-counts { margin: 0.75rem 0 1rem; }
+.detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.9rem; }
+.detail-group { background: var(--panel, rgba(255,255,255,0.03)); border: 1px solid var(--border, rgba(146,161,192,0.18)); border-radius: 12px; padding: 0.75rem 0.9rem; }
+.detail-group h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.detail-row { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.35rem 0; border-bottom: 1px solid rgba(146,161,192,0.12); }
+.detail-row:last-child { border-bottom: none; }
+.reason-card { margin: 0.5rem 0 0.75rem; }
+.reason-card textarea { width: 100%; margin-top: 0.35rem; }
+
+.suspended-screen { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 1.5rem; }
+.suspended-card { max-width: 420px; text-align: center; background: var(--panel, rgba(255,255,255,0.04)); border: 1px solid var(--border, rgba(146,161,192,0.25)); border-radius: 16px; padding: 2rem 1.5rem; }
+.suspended-icon { font-size: 2.75rem; margin-bottom: 0.5rem; }
+.suspended-card h2 { margin: 0 0 0.5rem; }
+.suspended-status { font-weight: 600; margin: 0 0 0.5rem; }
+.suspended-reason { color: var(--muted); margin: 0 0 0.75rem; }
+.suspended-card .btn { margin-top: 0.75rem; }
