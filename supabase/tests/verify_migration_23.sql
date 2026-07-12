@@ -38,16 +38,18 @@ select 'A2b all companies active + active mirrors status' as check,
        coalesce(bool_and(status='active' and active=true), true) as ok
 from public.companies;
 
-select 'A3 functions present' as check, count(*) as should_be_11
+select 'A3 functions present' as check, count(*) as should_be_12
 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
 where p.proname in ('is_app_admin','my_account_access','suspend_company','reactivate_company',
                     'archive_company','restore_archived_company','platform_overview','company_detail',
-                    'protect_app_admin_role','sync_company_active','platform_audit_immutable');
+                    'protect_app_admin_role','sync_company_active','platform_audit_immutable',
+                    'protect_company_lifecycle_fields');
 
 select 'A3b locked search_path (expect {search_path=pg_catalog})' as check, p.proname, p.proconfig
 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
 where p.proname in ('my_company_id','my_driver_id','my_outlet_id','my_vehicle_id','is_app_admin',
-                    'protect_app_admin_role','suspend_company','platform_overview','company_detail','my_account_access')
+                    'protect_app_admin_role','protect_company_lifecycle_fields','suspend_company',
+                    'platform_overview','company_detail','my_account_access')
 order by p.proname;
 
 select 'A4 audit RLS enabled' as check, relrowsecurity as ok
@@ -60,8 +62,22 @@ where table_schema='public' and table_name='platform_audit_log' and grantee='aut
 select 'A5 app_admin select policies (7 tables + audit)' as check, count(*) as should_be_8
 from pg_policies where schemaname='public' and policyname like '%_select_appadmin';
 
-select 'A6 triggers' as check, count(*) as should_be_2
-from pg_trigger where tgname in ('companies_sync_active','profiles_protect_app_admin') and not tgisinternal;
+select 'A6 triggers' as check, count(*) as should_be_3
+from pg_trigger where tgname in ('companies_sync_active','profiles_protect_app_admin',
+                                 'companies_protect_lifecycle') and not tgisinternal;
+
+-- BEFORE UPDATE triggers on companies fire in alphabetical name order, so the
+-- lifecycle guard (companies_protect_lifecycle) runs BEFORE the active mirror
+-- (companies_sync_active); it evaluates the caller's raw intent and cannot be
+-- bypassed by the mirror. Expect, in order:
+--   companies_protect_lifecycle, companies_sync_active, companies_updated_at,
+--   companies_validate_timezone
+select 'A6b companies BEFORE UPDATE trigger order' as check,
+       string_agg(tgname, ', ' order by tgname) as fire_order
+from pg_trigger
+where tgrelid='public.companies'::regclass and not tgisinternal
+  and (tgtype & 16) <> 0    -- UPDATE
+  and (tgtype & 2)  <> 0;   -- BEFORE
 
 select 'A7 rpc grants (authenticated only, no anon/public)' as check, routine_name, grantee, privilege_type
 from information_schema.routine_privileges
@@ -164,6 +180,114 @@ begin
   begin perform public.company_detail(app.my_company_id()); raise exception 'FAIL: outlet ran company_detail';
   exception when others then if position('Not allowed' in sqlerrm)=0 then raise; end if; end;
   raise notice 'PASS B-OUTLET: platform + company_detail rejected';
+end $$;
+reset role; rollback;
+
+-- ---------- B-LIFECYCLE-ADMIN: Company Admin cannot touch lifecycle columns ----------
+-- companies_admin_update lets a Company Admin update its OWN company row, so
+-- without the guard trigger it could set status/active/etc. directly and skip
+-- the RPCs, transition checks, required reasons and audit. Every direct
+-- lifecycle write must raise; legitimate settings (timezone,
+-- allow_driver_fuel_entry) must still succeed. Rolled back — nothing persists.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'REPLACE_COMPANY_ADMIN_UUID', true);
+do $$
+declare v_company uuid; col text; n int;
+begin
+  v_company := app.my_company_id();
+  if v_company is null then raise exception 'FAIL: admin has no company (bad UUID?)'; end if;
+  -- every lifecycle column, one at a time, must be rejected by the trigger
+  begin update public.companies set status='suspended' where id=v_company;
+    raise exception 'FAIL: admin set status directly';
+  exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end;
+  begin update public.companies set status='archived' where id=v_company;
+    raise exception 'FAIL: admin archived directly';
+  exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end;
+  begin update public.companies set active=false where id=v_company;
+    raise exception 'FAIL: admin flipped active directly';
+  exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end;
+  begin update public.companies set suspended_at=now() where id=v_company;
+    raise exception 'FAIL: admin set suspended_at directly';
+  exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end;
+  begin update public.companies set suspended_by=auth.uid() where id=v_company;
+    raise exception 'FAIL: admin set suspended_by directly';
+  exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end;
+  begin update public.companies set suspension_reason='x' where id=v_company;
+    raise exception 'FAIL: admin set suspension_reason directly';
+  exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end;
+  begin update public.companies set archived_at=now() where id=v_company;
+    raise exception 'FAIL: admin set archived_at directly';
+  exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end;
+  begin update public.companies set archived_by=auth.uid() where id=v_company;
+    raise exception 'FAIL: admin set archived_by directly';
+  exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end;
+  -- the row must be untouched
+  if (select status from public.companies where id=v_company) <> 'active'
+    then raise exception 'FAIL: status mutated'; end if;
+  -- legitimate settings still work
+  update public.companies set timezone='UTC' where id=v_company; get diagnostics n=row_count;
+  if n<>1 then raise exception 'FAIL: admin blocked from timezone (% rows)', n; end if;
+  update public.companies set allow_driver_fuel_entry = not allow_driver_fuel_entry where id=v_company;
+  get diagnostics n=row_count;
+  if n<>1 then raise exception 'FAIL: admin blocked from allow_driver_fuel_entry (% rows)', n; end if;
+  raise notice 'PASS B-LIFECYCLE-ADMIN: all lifecycle columns rejected; timezone + allow_driver_fuel_entry still editable';
+end $$;
+reset role; rollback;
+
+-- ---------- B-LIFECYCLE-OTHERS: Manager/Driver/Outlet/app_admin direct lifecycle ----------
+-- These roles have no companies UPDATE policy, so RLS filters the row out
+-- (0 rows) — the lifecycle change never lands. Verified per role.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'REPLACE_MANAGER_UUID', true);
+do $$ declare n int; begin
+  update public.companies set status='suspended';   -- unqualified: only rows RLS exposes
+  get diagnostics n=row_count;
+  if n<>0 then raise exception 'FAIL: manager changed % company rows', n; end if;
+end $$;
+select set_config('request.jwt.claim.sub', 'REPLACE_DRIVER_UUID', true);
+do $$ declare n int; begin
+  update public.companies set active=false; get diagnostics n=row_count;
+  if n<>0 then raise exception 'FAIL: driver changed % company rows', n; end if;
+end $$;
+select set_config('request.jwt.claim.sub', 'REPLACE_OUTLET_UUID', true);
+do $$ declare n int; begin
+  update public.companies set archived_at=now(); get diagnostics n=row_count;
+  if n<>0 then raise exception 'FAIL: outlet changed % company rows', n; end if;
+end $$;
+select set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+do $$ declare n int; begin
+  -- app_admin gets SELECT on every company but NO update policy, so a direct
+  -- write is filtered to 0 rows: lifecycle changes are RPC-only for app_admin.
+  update public.companies set status='suspended'; get diagnostics n=row_count;
+  if n<>0 then raise exception 'FAIL: app_admin changed % company rows directly', n; end if;
+  raise notice 'PASS B-LIFECYCLE-OTHERS: manager/driver/outlet/app_admin direct lifecycle writes hit 0 rows (RPC-only)';
+end $$;
+reset role; rollback;
+
+-- ---------- B-LIFECYCLE-SERVICE: service_role is the case the trigger exists for ----------
+-- service_role bypasses RLS AND has table grants, so ONLY the trigger stands
+-- between it and a direct lifecycle write. It must be rejected — even if the
+-- caller flips the RPC marker on, because v_rpc also requires
+-- current_user='postgres', which a direct service_role write never has.
+-- Non-lifecycle settings remain writable. Rolled back.
+begin;
+set local role service_role;
+do $$ begin
+  update public.companies set status='suspended', active=false, suspended_at=now(), suspension_reason='sr';
+  raise exception 'FAIL: service_role changed lifecycle directly';
+exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end $$;
+select set_config('app.lifecycle_rpc','on',true);   -- marker alone must not be enough
+do $$ begin
+  update public.companies set status='suspended';
+  raise exception 'FAIL: marker alone let service_role through';
+exception when others then if position('lifecycle fields' in sqlerrm)=0 then raise; end if; end $$;
+select set_config('app.lifecycle_rpc','off',true);
+do $$ declare n int; begin
+  update public.companies set timezone='UTC'; get diagnostics n=row_count;   -- non-lifecycle: allowed
+  if n<1 then raise exception 'FAIL: service_role blocked from a non-lifecycle settings write'; end if;
+  raise notice 'PASS B-LIFECYCLE-SERVICE: service_role direct lifecycle rejected by trigger (marker alone insufficient); settings still writable';
 end $$;
 reset role; rollback;
 

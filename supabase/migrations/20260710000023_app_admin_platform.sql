@@ -121,6 +121,58 @@ returns boolean language sql stable security definer set search_path = pg_catalo
 $$;
 grant execute on function app.is_app_admin() to authenticated;
 
+-- ---- 5b) Company lifecycle-field guard ----
+-- companies_admin_update (Migration 2) lets a Company Admin update its own
+-- company row — including, without this guard, the lifecycle columns. This
+-- BEFORE UPDATE trigger rejects any change to a lifecycle field unless it
+-- comes through a trusted path:
+--   (a) the SQL Editor / migration context (current_user='postgres' AND
+--       session_user='postgres'); or
+--   (b) inside an approved lifecycle RPC — proven by ALL of: a
+--       transaction-local marker set by the RPC, the SECURITY DEFINER
+--       execution context (current_user='postgres'), AND app.is_app_admin().
+--       The marker alone is never sufficient (an ordinary caller can set the
+--       GUC but can never be current_user='postgres' outside the definer RPC).
+-- Legitimate company-settings updates (timezone, allow_driver_fuel_entry,
+-- name, …) touch no lifecycle field and pass straight through. Rejects
+-- Company Admin / Manager / Driver / Outlet / service_role / app_admin
+-- direct DML. companies.status stays the source of truth; the guard runs
+-- BEFORE companies_sync_active (name order: protect_lifecycle < sync_active
+-- < updated_at < validate_timezone), so it evaluates the caller's raw intent
+-- and the active mirror is applied afterwards.
+create or replace function app.protect_company_lifecycle_fields()
+returns trigger
+language plpgsql
+set search_path = pg_catalog
+as $$
+declare
+  v_changed boolean;
+  v_editor  boolean := (current_user = 'postgres' and session_user = 'postgres');
+  v_rpc     boolean := (current_setting('app.lifecycle_rpc', true) = 'on'
+                        and current_user = 'postgres'
+                        and app.is_app_admin());
+begin
+  v_changed :=
+       (new.status            is distinct from old.status)
+    or (new.active            is distinct from old.active)
+    or (new.suspended_at      is distinct from old.suspended_at)
+    or (new.suspended_by      is distinct from old.suspended_by)
+    or (new.suspension_reason is distinct from old.suspension_reason)
+    or (new.archived_at       is distinct from old.archived_at)
+    or (new.archived_by       is distinct from old.archived_by);
+
+  if v_changed and not (v_editor or v_rpc) then
+    raise exception 'Company lifecycle fields can only be changed through the lifecycle RPCs (suspend/reactivate/archive/restore)';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists companies_protect_lifecycle on public.companies;
+create trigger companies_protect_lifecycle
+  before update on public.companies
+  for each row execute function app.protect_company_lifecycle_fields();
+
 -- ---- 6) Role-escalation protection for app_admin ----
 -- SECURITY INVOKER so current_user/session_user reflect the real caller.
 -- Only the trusted manual context (the Supabase SQL Editor / migration
@@ -255,17 +307,20 @@ begin
   if not app.is_app_admin() then raise exception 'Not allowed'; end if;
   if p_company is null then raise exception 'A target company is required'; end if;
   if p_reason is null or btrim(p_reason) = '' then raise exception 'A suspension reason is required'; end if;
-  select * into v_row from public.companies where id = p_company;
+  -- Lock the row so concurrent lifecycle calls serialize on the same source state.
+  select * into v_row from public.companies where id = p_company for update;
   if not found then raise exception 'Company not found'; end if;
   -- Transition: only an ACTIVE company can be suspended.
   if v_row.status <> 'active' then
     raise exception 'Only an active company can be suspended (current status: %)', v_row.status;
   end if;
 
+  perform set_config('app.lifecycle_rpc', 'on', true);   -- authorize the lifecycle-field trigger
   update public.companies
      set status = 'suspended', suspended_at = now(), suspended_by = v_actor,
          suspension_reason = btrim(p_reason)
    where id = p_company;
+  perform set_config('app.lifecycle_rpc', 'off', true);
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, details)
   values (v_actor, 'company_suspended', p_company,
@@ -282,7 +337,7 @@ declare v_actor uuid := auth.uid(); v_row public.companies;
 begin
   if not app.is_app_admin() then raise exception 'Not allowed'; end if;
   if p_company is null then raise exception 'A target company is required'; end if;
-  select * into v_row from public.companies where id = p_company;
+  select * into v_row from public.companies where id = p_company for update;
   if not found then raise exception 'Company not found'; end if;
   -- Transition: reactivate ONLY from suspended. archived uses
   -- restore_archived_company; pending_setup activation is reserved for the
@@ -291,9 +346,11 @@ begin
     raise exception 'Only a suspended company can be reactivated (current status: %)', v_row.status;
   end if;
 
+  perform set_config('app.lifecycle_rpc', 'on', true);
   update public.companies
      set status = 'active', suspended_at = null, suspended_by = null, suspension_reason = null
    where id = p_company;
+  perform set_config('app.lifecycle_rpc', 'off', true);
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, details)
   values (v_actor, 'company_reactivated', p_company,
@@ -311,7 +368,7 @@ begin
   if not app.is_app_admin() then raise exception 'Not allowed'; end if;
   if p_company is null then raise exception 'A target company is required'; end if;
   if p_reason is null or btrim(p_reason) = '' then raise exception 'An archive reason is required'; end if;
-  select * into v_row from public.companies where id = p_company;
+  select * into v_row from public.companies where id = p_company for update;
   if not found then raise exception 'Company not found'; end if;
   -- Transition: archive ONLY from active or suspended (not already archived,
   -- not pending_setup).
@@ -319,9 +376,11 @@ begin
     raise exception 'Only an active or suspended company can be archived (current status: %)', v_row.status;
   end if;
 
+  perform set_config('app.lifecycle_rpc', 'on', true);
   update public.companies
      set status = 'archived', archived_at = now(), archived_by = v_actor
    where id = p_company;
+  perform set_config('app.lifecycle_rpc', 'off', true);
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, details)
   values (v_actor, 'company_archived', p_company,
@@ -338,16 +397,18 @@ declare v_actor uuid := auth.uid(); v_row public.companies;
 begin
   if not app.is_app_admin() then raise exception 'Not allowed'; end if;
   if p_company is null then raise exception 'A target company is required'; end if;
-  select * into v_row from public.companies where id = p_company;
+  select * into v_row from public.companies where id = p_company for update;
   if not found then raise exception 'Company not found'; end if;
   -- Transition: restore ONLY from archived.
   if v_row.status <> 'archived' then
     raise exception 'Only an archived company can be restored (current status: %)', v_row.status;
   end if;
 
+  perform set_config('app.lifecycle_rpc', 'on', true);
   update public.companies
      set status = 'active', archived_at = null, archived_by = null
    where id = p_company;
+  perform set_config('app.lifecycle_rpc', 'off', true);
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, details)
   values (v_actor, 'company_restored', p_company,
