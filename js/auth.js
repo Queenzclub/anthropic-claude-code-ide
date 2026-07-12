@@ -2,6 +2,7 @@
 // Used by the login page and every dashboard page.
 
 var ROLE_PAGES = {
+  app_admin: 'app-admin.html',
   admin: 'admin.html',
   manager: 'manager.html',
   outlet: 'outlet.html',
@@ -9,11 +10,16 @@ var ROLE_PAGES = {
 };
 
 var ROLE_LABELS = {
+  app_admin: 'App Admin',
   admin: 'Admin',
   manager: 'Manager',
   outlet: 'Outlet',
   driver: 'Driver',
 };
+
+// Company roles whose access depends on their company still being active.
+// app_admin is the platform owner and has no company, so it is excluded.
+var COMPANY_ROLES = ['admin', 'manager', 'outlet', 'driver'];
 
 // One-shot message passed to the login page (e.g. "account inactive").
 function setLoginMessage(msg) {
@@ -124,10 +130,68 @@ async function applyChrome(ctx) {
   return ctx;
 }
 
+// Full-screen block shown to a company user whose company is not active
+// (suspended / archived / pending_setup). Driven entirely by the
+// my_account_access() RPC — the same server-side source of truth the
+// database uses to gate every operational path — so the screen can never
+// disagree with what the user is actually allowed to do.
+function showSuspendedScreen(acc) {
+  var messages = {
+    suspended: 'Your company account is currently suspended.',
+    archived: 'Your company account has been archived.',
+    pending_setup: 'Your company account is being set up.',
+  };
+  var statusText = messages[acc.company_status] || 'Your company account is not active right now.';
+  var reason = (acc.company_status === 'suspended' && acc.suspension_reason)
+    ? '<p class="suspended-reason">Reason: ' + escapeHtml(acc.suspension_reason) + '</p>' : '';
+  document.body.innerHTML =
+    '<div class="suspended-screen">' +
+      '<div class="suspended-card">' +
+        '<div class="suspended-icon">⛔</div>' +
+        '<h2>' + escapeHtml(acc.company_name || 'Fleet Board Pro') + '</h2>' +
+        '<p class="suspended-status">' + escapeHtml(statusText) + '</p>' +
+        reason +
+        '<p class="muted small">Please contact your platform administrator for help.</p>' +
+        '<button id="suspendedLogout" class="btn btn-primary" type="button">Log Out</button>' +
+      '</div>' +
+    '</div>';
+  document.body.classList.remove('loading');
+  document.body.classList.add('ready');
+  var btn = document.getElementById('suspendedLogout');
+  if (btn) btn.addEventListener('click', function () { sendToLogin(null); });
+}
+
+// For company roles, confirm the company is still active before showing the
+// dashboard. Returns true when operational access is allowed; otherwise
+// renders the suspended screen and returns false. Fails OPEN on an RPC error
+// (the dashboard is still fully protected by RLS, so a transient failure
+// must not lock a legitimate user out with a false "suspended" screen).
+async function enforceCompanyActive(ctx) {
+  if (!window.sb || !window.sb.rpc) return true;
+  var res;
+  try {
+    res = await window.sb.rpc('my_account_access');
+  } catch (e) {
+    return true;
+  }
+  if (!res || res.error || !res.data) return true;
+  var acc = res.data;
+  if (acc.operational_allowed === false &&
+      acc.company_status && acc.company_status !== 'active') {
+    showSuspendedScreen(acc);
+    return false;
+  }
+  return true;
+}
+
 // Guard + chrome for a role-specific dashboard page.
 async function initDashboard(expectedRole) {
   var ctx = await guardPage(expectedRole);
   if (!ctx) return null;
+  if (COMPANY_ROLES.indexOf(expectedRole) !== -1) {
+    var ok = await enforceCompanyActive(ctx);
+    if (!ok) return null;
+  }
   return applyChrome(ctx);
 }
 

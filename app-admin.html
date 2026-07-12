@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <title>Fleet Board Pro — Platform Admin</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="loading">
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">🛰️ Fleet Board Pro</div>
+      <div class="user-info">
+        <span id="userName" class="user-name"></span>
+        <span id="roleBadge" class="badge"></span>
+      </div>
+      <button id="logoutBtn" class="btn btn-outline btn-small" type="button">Log Out</button>
+    </header>
+
+    <main class="content">
+      <h2>Platform Admin</h2>
+      <p class="muted page-sub">Fleet Board Pro platform owner — every company, read-only except lifecycle controls.</p>
+
+      <div id="flash"></div>
+
+      <section>
+        <div class="section-head">
+          <h3>🌐 Platform Overview</h3>
+          <button id="refreshAll" class="btn btn-outline btn-small" type="button">Refresh</button>
+        </div>
+        <div id="overviewStats" class="stats"></div>
+        <div id="totalsStats" class="stats" style="margin-top: 0.75rem;"></div>
+      </section>
+
+      <section id="companiesSection" style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🏢 Companies</h3>
+          <label class="toggle-inline">
+            <input type="checkbox" id="showArchived">
+            <span>Show archived</span>
+          </label>
+        </div>
+        <div id="companyList" class="cards"></div>
+      </section>
+
+      <section id="companyDetailSection" class="hidden" style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>🔎 Company Detail</h3>
+          <button id="closeDetail" class="btn btn-outline btn-small" type="button">Close</button>
+        </div>
+        <div id="companyDetailHost"></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="loader">Loading…</div>
+
+  <script src="vendor/supabase.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app-admin.js"></script>
+  <script>
+    initDashboard('app_admin').then(function (ctx) { if (ctx) initAppAdminPage(ctx); });
+  </script>
+  <script src="js/pwa.js"></script>
+</body>
+</html>
