@@ -70,10 +70,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
         }
         return { userId: r.data?.user?.id ?? null };
       },
-      deleteUser: async (id) => {
-        const r = await admin.auth.admin.deleteUser(id);
-        return { error: r.error };
-      },
+      // No deleteUser: the workflow never deletes an Auth user (a link RPC may
+      // have committed while its response was lost).
     },
     // Recovery/setup email uses the ANON/caller client — never service-role.
     sendRecoveryEmail: async (email) => {

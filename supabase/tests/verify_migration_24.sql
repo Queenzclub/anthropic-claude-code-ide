@@ -71,6 +71,11 @@ where routine_schema='public'
                        'complete_company_onboarding','record_admin_setup_email_result')
 order by routine_name, grantee;
 
+select 'A7 case-insensitive company-code unique index' as check, count(*) as should_be_1
+from pg_indexes where schemaname='public' and tablename='companies' and indexname='companies_code_ci_uidx';
+select 'A7b company-code format check constraint' as check, count(*) as should_be_1
+from pg_constraint where conname='companies_code_format_chk';
+
 
 -- ================= Part B — behavior (edit the UUID) =======================
 
@@ -153,6 +158,57 @@ begin
      or p.role::text <> 'admin' or not p.active or p.company_id <> co then raise exception 'FAIL: activation state %', j; end if;
   if (j->>'setup_email_status') <> 'failed' then raise exception 'FAIL: email status lost'; end if;
   raise notice 'PASS B-HAPPY: no activation before link; new user linked; email failure did not block activation';
+end $$;
+rollback;
+
+-- ---------- B-CODE-CI: case-equivalent company code is rejected ----------
+begin;
+do $$
+declare j jsonb;
+begin
+  perform set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+  perform set_config('request.jwt.claim.sub', '', true);
+  insert into public.companies (name, code, timezone, status, active) values ('Pre','CICODE','UTC','active',true);
+  perform set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+  begin perform public.begin_company_onboarding(gen_random_uuid(),'Clash','cicode','UTC','n','clash@ci.co');
+        raise exception 'FAIL: case-equivalent code accepted';
+  exception when others then if sqlerrm <> 'company_code_exists' then raise; end if; end;
+  raise notice 'PASS B-CODE-CI: existing CICODE blocks onboarding cicode';
+end $$;
+rollback;
+
+-- ---------- B-MARKER: authenticated App Admin direct profile DML is blocked ----------
+begin;
+set local role authenticated;
+select set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+do $$
+declare n int; target uuid;
+begin
+  select user_id into target from public.profiles where role <> 'app_admin' limit 1;
+  -- Even if the app_admin sets the marker itself, RLS gives no UPDATE path.
+  perform set_config('app.onboarding_profile_link', 'on', true);
+  begin
+    update public.profiles set role='admin' where user_id = target;
+    get diagnostics n = row_count;
+    if n <> 0 then raise exception 'FAIL: authenticated app_admin changed a profile directly'; end if;
+  exception when others then if position('Only an admin' in sqlerrm) = 0 then raise; end if; end;
+  raise notice 'PASS B-MARKER: authenticated app_admin cannot use the marker for direct profile DML';
+end $$;
+reset role; rollback;
+
+-- ---------- B-EMAIL-GATE: setup-email ops rejected before admin_linked ----------
+begin;
+do $$
+declare j jsonb; ob uuid;
+begin
+  perform set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+  j := public.begin_company_onboarding(gen_random_uuid(),'Gate Co','GATE24','UTC','n','gate24@new.co');
+  ob := (j->>'onboarding_id')::uuid;   -- state = company_created (no admin yet)
+  begin perform public.get_onboarding_setup_target(ob); raise exception 'FAIL: setup target before link';
+  exception when others then if sqlerrm <> 'admin_not_linked' then raise; end if; end;
+  begin perform public.record_admin_setup_email_result(ob,'requested',null,false); raise exception 'FAIL: email result before link';
+  exception when others then if sqlerrm <> 'admin_not_linked' then raise; end if; end;
+  raise notice 'PASS B-EMAIL-GATE: setup-email target + record rejected before admin_linked';
 end $$;
 rollback;
 

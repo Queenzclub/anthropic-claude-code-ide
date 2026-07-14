@@ -24,6 +24,83 @@
 --     passwords, tokens, or links.
 -- ============================================================
 
+-- ---- 0a) Company-code policy: case-insensitive uniqueness + format ---------
+-- Approved codes are uppercase; case-equivalent duplicates are forbidden.
+-- Preflight FIRST (fail loudly rather than silently mangling data), then
+-- normalize existing codes to uppercase, add a case-insensitive unique index,
+-- and enforce the format. Enforced in the DB, not just the Edge Function.
+do $$
+declare v_bad text;
+begin
+  -- Preflight 1: no case-insensitive duplicate codes.
+  if exists (
+    select 1 from public.companies group by upper(btrim(code)) having count(*) > 1
+  ) then
+    raise exception 'Migration 24 preflight failed: companies have case-insensitive duplicate codes (upper(trim(code))). Resolve the duplicates before applying.';
+  end if;
+  -- Preflight 2: every existing code matches the approved format after upper(trim()).
+  select upper(btrim(code)) into v_bad from public.companies
+   where upper(btrim(code)) !~ '^[A-Z0-9][A-Z0-9-]{2,31}$' limit 1;
+  if v_bad is not null then
+    raise exception 'Migration 24 preflight failed: existing company code % does not match ^[A-Z0-9][A-Z0-9-]{2,31}$ after uppercasing. Fix it before applying.', v_bad;
+  end if;
+end $$;
+
+-- Normalize existing codes to uppercase (code is not a lifecycle field, so the
+-- Migration 23 lifecycle guard does not apply).
+update public.companies set code = upper(btrim(code)) where code <> upper(btrim(code));
+
+-- Case-insensitive uniqueness + format check (in addition to the existing
+-- exact-unique constraint from Migration 1).
+create unique index if not exists companies_code_ci_uidx on public.companies (upper(code));
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'companies_code_format_chk') then
+    alter table public.companies
+      add constraint companies_code_format_chk check (code ~ '^[A-Z0-9][A-Z0-9-]{2,31}$');
+  end if;
+end $$;
+
+-- ---- 0b) Profile-link marker for onboarding --------------------------------
+-- link_first_company_admin must set role/company/active on the first admin's
+-- profile. app.protect_profile_fields (Migration 1) normally blocks that unless
+-- the caller is a Company Admin or a trusted no-auth.uid() setup session. We add
+-- a NARROW onboarding path proven by ALL of: a transaction-local marker set only
+-- by the onboarding RPC, the SECURITY DEFINER postgres context, AND an active
+-- app_admin caller. The App Admin's real auth.uid() is retained throughout (we
+-- never blank the JWT claim). Company Admin / SQL-editor / ordinary behavior is
+-- unchanged.
+create or replace function app.protect_profile_fields()
+returns trigger
+language plpgsql security definer
+set search_path = public
+as $$
+begin
+  -- Trusted onboarding profile-link path (marker + postgres context + app_admin).
+  if current_setting('app.onboarding_profile_link', true) = 'on'
+     and current_user = 'postgres'
+     and app.is_app_admin() then
+    return new;
+  end if;
+
+  if auth.uid() is null then
+    return new;
+  end if;
+
+  if not app.is_admin() and (
+       new.role       is distinct from old.role
+    or new.company_id is distinct from old.company_id
+    or new.outlet_id  is distinct from old.outlet_id
+    or new.driver_id  is distinct from old.driver_id
+    or new.vehicle_id is distinct from old.vehicle_id
+    or new.active     is distinct from old.active
+  ) then
+    raise exception 'Only an admin can change role, company, or assignments';
+  end if;
+
+  return new;
+end;
+$$;
+
 -- ---- 1) Enums -------------------------------------------------------------
 
 do $$ begin
@@ -67,6 +144,9 @@ create table if not exists public.company_onboarding (
   idempotency_key          uuid not null unique,
   request_fingerprint      text not null,
   auth_user_id             uuid,
+  -- Audit provenance ONLY (first_company_admin_auth_created vs
+  -- first_company_admin_existing_user_adopted). Never used to authorize a
+  -- destructive action — the workflow never deletes an Auth user.
   auth_user_created_by_us  boolean not null default false,
   setup_email_status       public.setup_email_status not null default 'not_attempted',
   setup_email_attempt_count integer not null default 0,
@@ -190,6 +270,31 @@ as $$
     'setup_email_attempt_count', p.setup_email_attempt_count,
     'error_code', p.error_code,
     'completed_at', p.completed_at);
+$$;
+
+-- Verifies the onboarding's first admin is genuinely linked + active + clean:
+-- auth_user_id known, profile matches the auth user AND the onboarding company,
+-- role=admin, active, and no outlet/driver/vehicle links. Used by the
+-- activation gate AND the setup-email gates.
+create or replace function app.onboarding_admin_linked_ok(p public.company_onboarding)
+returns boolean
+language plpgsql
+stable
+set search_path = pg_catalog
+as $$
+declare v_prof public.profiles;
+begin
+  if p.auth_user_id is null then return false; end if;
+  select * into v_prof from public.profiles where user_id = p.auth_user_id;
+  if not found then return false; end if;
+  return v_prof.user_id = p.auth_user_id
+     and v_prof.company_id = p.company_id
+     and v_prof.role::text = 'admin'
+     and v_prof.active
+     and v_prof.outlet_id is null
+     and v_prof.driver_id is null
+     and v_prof.vehicle_id is null;
+end;
 $$;
 
 -- ---- 5) begin_company_onboarding -----------------------------------------
@@ -368,15 +473,14 @@ begin
     raise exception 'email_already_linked';
   end if;
 
-  -- Link the fully-unlinked, inactive profile as this company's admin. The
-  -- profile-field guard (Migration 1) sanctions changes when auth.uid() is
-  -- null (its service/SQL-editor path); we briefly clear the JWT claim for the
-  -- write only, then restore it. We do NOT edit that trigger.
-  perform set_config('request.jwt.claim.sub', '', true);
+  -- Link the fully-unlinked, inactive profile as this company's admin, via the
+  -- narrow onboarding profile-link marker (see app.protect_profile_fields). The
+  -- App Admin's auth.uid() is retained throughout.
+  perform set_config('app.onboarding_profile_link', 'on', true);
   update public.profiles
      set company_id = v_ob.company_id, role = 'admin', active = true, updated_at = now()
    where user_id = p_auth_user_id;
-  perform set_config('request.jwt.claim.sub', coalesce(v_actor::text, ''), true);
+  perform set_config('app.onboarding_profile_link', 'off', true);
 
   update public.company_onboarding
      set auth_user_id = p_auth_user_id, auth_user_created_by_us = coalesce(p_created_by_us, false),
@@ -408,7 +512,6 @@ as $$
 declare
   v_actor uuid := auth.uid();
   v_ob    public.company_onboarding;
-  v_prof  public.profiles;
   v_co    public.companies;
 begin
   if not app.is_app_admin() then raise exception 'not_allowed'; end if;
@@ -419,18 +522,9 @@ begin
 
   select * into v_co from public.companies where id = v_ob.company_id for update;
 
-  -- Verification gate (all must hold):
-  if v_ob.auth_user_id is null then raise exception 'retry_required'; end if;
-  select * into v_prof from public.profiles where user_id = v_ob.auth_user_id;
-  if not found
-     or v_prof.user_id  is distinct from v_ob.auth_user_id
-     or v_prof.company_id is distinct from v_ob.company_id
-     or v_prof.role::text <> 'admin'
-     or v_prof.active is not true
-     or v_prof.outlet_id  is not null
-     or v_prof.driver_id  is not null
-     or v_prof.vehicle_id is not null
-     or v_co.status <> 'pending_setup' then
+  -- Verification gate: the admin must be fully linked + active + clean, and the
+  -- company must still be pending_setup.
+  if not app.onboarding_admin_linked_ok(v_ob) or v_co.status <> 'pending_setup' then
     raise exception 'retry_required';
   end if;
 
@@ -528,6 +622,10 @@ begin
 
   select * into v_ob from public.company_onboarding where id = p_onboarding for update;
   if not found then raise exception 'invalid_input'; end if;
+  -- Setup-email operations are only valid once the admin is genuinely linked.
+  if v_ob.state not in ('admin_linked', 'completed') or not app.onboarding_admin_linked_ok(v_ob) then
+    raise exception 'admin_not_linked';
+  end if;
 
   update public.company_onboarding
      set setup_email_status = p_result_status,
@@ -584,6 +682,10 @@ begin
   if not app.is_app_admin() then raise exception 'not_allowed'; end if;
   select * into v_ob from public.company_onboarding where id = p_onboarding;
   if not found then raise exception 'invalid_input'; end if;
+  -- Only expose a setup-email target once the admin is genuinely linked.
+  if v_ob.state not in ('admin_linked', 'completed') or not app.onboarding_admin_linked_ok(v_ob) then
+    raise exception 'admin_not_linked';
+  end if;
   return jsonb_build_object('admin_email_normalized', v_ob.admin_email_normalized);
 end;
 $$;
@@ -614,3 +716,4 @@ end $$;
 revoke all on function app.onboarding_normalize(text,text,text,text,text) from public, anon;
 revoke all on function app.onboarding_classify(public.company_onboarding) from public, anon;
 revoke all on function app.onboarding_status_json(public.company_onboarding) from public, anon;
+revoke all on function app.onboarding_admin_linked_ok(public.company_onboarding) from public, anon;

@@ -69,7 +69,7 @@ export function validateInput(
 export const SAFE_ERRORS = new Set([
   "invalid_input", "not_allowed", "company_code_exists", "email_already_linked",
   "onboarding_in_progress", "idempotency_conflict", "invitation_failed",
-  "setup_email_failed", "retry_required", "onboarding_failed",
+  "setup_email_failed", "retry_required", "onboarding_failed", "admin_not_linked",
 ]);
 
 // Map an internal error message (from an RPC RAISE or a thrown error) to a safe

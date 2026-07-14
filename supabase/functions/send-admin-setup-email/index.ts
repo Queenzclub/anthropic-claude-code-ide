@@ -43,13 +43,12 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const onboardingId = body && typeof body.onboarding_id === "string" ? body.onboarding_id : "";
   if (!UUID_RE.test(onboardingId)) return errorResponse("invalid_input", 400, cors);
 
-  // Note: `admin` (service-role) is intentionally NOT constructed here — resend
-  // uses only the caller client's resetPasswordForEmail.
+  // Note: no service-role client is constructed here — resend uses only the
+  // caller client's resetPasswordForEmail.
   const deps: Deps = {
     rpc: (fn, args) => userClient.rpc(fn, args),
     authAdmin: {
       inviteUserByEmail: () => Promise.resolve({ error: { message: "not_used" } }),
-      deleteUser: () => Promise.resolve({ error: null }),
     },
     sendRecoveryEmail: async (email) => {
       const r = await userClient.auth.resetPasswordForEmail(email, { redirectTo: SET_PASSWORD_URL });
