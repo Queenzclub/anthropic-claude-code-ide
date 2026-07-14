@@ -11,14 +11,24 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, errorResponse, json, readJson } from "../_shared/http.ts";
-import { validateInput } from "../_shared/validate.ts";
+import { readConfig, validateInput } from "../_shared/validate.ts";
 import { Deps, runCreateCompany } from "../_shared/onboarding.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
-const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN")!;
-const SET_PASSWORD_URL = Deno.env.get("SET_PASSWORD_URL") ?? `${ALLOWED_ORIGIN}/set-password.html`;
+// Startup config validation: throws (and the function fails to boot) when
+// ALLOWED_ORIGIN or SET_PASSWORD_URL is missing/invalid. SET_PASSWORD_URL is
+// REQUIRED and is a full URL including the GitHub Pages repository path
+// (https://queenzclub.github.io/anthropic-claude-code-ide/set-password.html) —
+// it is never derived from ALLOWED_ORIGIN (which is only the HTTP origin) and
+// never accepted from the request body.
+const CFG = readConfig({
+  ALLOWED_ORIGIN: Deno.env.get("ALLOWED_ORIGIN"),
+  SET_PASSWORD_URL: Deno.env.get("SET_PASSWORD_URL"),
+});
+const ALLOWED_ORIGIN = CFG.allowedOrigin;
+const SET_PASSWORD_URL = CFG.setPasswordUrl;
 
 Deno.serve(async (req: Request): Promise<Response> => {
   const cors = corsHeaders(ALLOWED_ORIGIN);
@@ -70,8 +80,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
         }
         return { userId: r.data?.user?.id ?? null };
       },
-      // No deleteUser: the workflow never deletes an Auth user (a link RPC may
-      // have committed while its response was lost).
+      // Invite is the ONLY Auth Admin operation. The workflow has no capability
+      // to remove Auth users (a link RPC may have committed while its response
+      // was lost).
     },
     // Recovery/setup email uses the ANON/caller client — never service-role.
     sendRecoveryEmail: async (email) => {

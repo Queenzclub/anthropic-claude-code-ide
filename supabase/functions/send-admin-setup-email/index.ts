@@ -10,13 +10,20 @@
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders, errorResponse, json, readJson } from "../_shared/http.ts";
+import { readConfig } from "../_shared/validate.ts";
 import { Deps, runSendSetupEmail } from "../_shared/onboarding.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
-const SERVICE_ROLE_KEY = Deno.env.get("SERVICE_ROLE_KEY")!;
-const ALLOWED_ORIGIN = Deno.env.get("ALLOWED_ORIGIN")!;
-const SET_PASSWORD_URL = Deno.env.get("SET_PASSWORD_URL") ?? `${ALLOWED_ORIGIN}/set-password.html`;
+// Startup config validation (throws if missing/invalid). SET_PASSWORD_URL is
+// REQUIRED — a full URL including the GitHub Pages repository path, never
+// derived from ALLOWED_ORIGIN, never accepted from the request body.
+const CFG = readConfig({
+  ALLOWED_ORIGIN: Deno.env.get("ALLOWED_ORIGIN"),
+  SET_PASSWORD_URL: Deno.env.get("SET_PASSWORD_URL"),
+});
+const ALLOWED_ORIGIN = CFG.allowedOrigin;
+const SET_PASSWORD_URL = CFG.setPasswordUrl;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

@@ -6,17 +6,23 @@
 //   * `rpc` is the CALLER-scoped App Admin JWT client. EVERY onboarding RPC,
 //     lifecycle change, profile link, onboarding-table mutation and audit
 //     insert goes through it — so app.is_app_admin() authorizes each call.
-//   * `authAdmin` is the SERVICE-ROLE client, used ONLY for Auth Admin API
-//     operations — and ONLY inviteUserByEmail. There is deliberately NO
-//     deleteUser: the workflow NEVER deletes an Auth user, because a link RPC
-//     may have committed while its response was lost. A harmless unlinked
-//     inactive Auth account is preferable to deleting a possibly-committed
-//     administrator.
+//   * `authAdmin` is the SERVICE-ROLE client, exposing ONLY inviteUserByEmail.
+//     The workflow has no capability to delete Auth users: a link RPC may have
+//     committed while its response was lost, so a stray unlinked inactive
+//     account is always preferable to removing a possibly-committed admin.
 //   * `sendRecoveryEmail` uses the ANON/caller client's resetPasswordForEmail,
 //     NOT the service-role client.
+//   * PROCESSING LEASE: each execution generates a server-side processing
+//     token (never accepted from the browser) and must claim the onboarding
+//     before any Auth or email operation. Every state-mutating RPC verifies
+//     the token, so a concurrent execution gets `onboarding_in_progress` and
+//     performs no side effects. complete/fail release the lease atomically;
+//     if the function crashes, lease expiry allows later recovery. No
+//     PostgreSQL transaction is held open across an Auth API call — each RPC
+//     commits on its own and the lease spans them.
 //
 // RPC calls resolve with { data, error }. We NEVER silently ignore a returned
-// error object: markers/recording are only tolerated after re-reading the
+// error object: idempotent tolerance happens only after re-reading the
 // authoritative onboarding status and confirming it is safe.
 
 import {
@@ -42,6 +48,10 @@ function atOrPast(state: string, target: string): boolean {
   return s >= 0 && t >= 0 && s >= t;
 }
 
+function newProcessingToken(): string {
+  return (globalThis as any).crypto.randomUUID();
+}
+
 function ok(data: any, input: NormalizedInput, emailStatus?: string): Outcome {
   return {
     ok: true,
@@ -56,7 +66,7 @@ function ok(data: any, input: NormalizedInput, emailStatus?: string): Outcome {
 }
 
 export async function runCreateCompany(deps: Deps, input: NormalizedInput): Promise<Outcome> {
-  // 1) Reserve + create the company (idempotent).
+  // 1) Reserve + create the company (idempotent). No lease needed to read.
   const begin = await deps.rpc("begin_company_onboarding", {
     p_idempotency_key: input.idempotency_key,
     p_company_name: input.company_name,
@@ -69,28 +79,41 @@ export async function runCreateCompany(deps: Deps, input: NormalizedInput): Prom
   const ob: string = begin.data.onboarding_id;
   let state: string = begin.data.state;
 
-  if (state === "completed") return ok(begin.data, input); // replay of a finished onboarding
+  // Replays of settled onboardings return WITHOUT claiming: no Auth/email work.
+  if (state === "completed") return ok(begin.data, input);
   if (state === "failed_terminal") return { ok: false, error: toSafeError(begin.data.error_code) };
 
+  // 1b) Acquire the processing lease. A concurrent execution for the same
+  // onboarding fails HERE, before any Auth or email operation.
+  const token = newProcessingToken();
+  const claim = await deps.rpc("claim_company_onboarding_processing", {
+    p_onboarding: ob, p_processing_token: token,
+  });
+  if (claim.error) return { ok: false, error: toSafeError(claim.error.message) };
+
   const failOnboarding = async (code: string, terminal: boolean): Promise<Outcome> => {
-    const r = await deps.rpc("fail_company_onboarding", { p_onboarding: ob, p_error_code: code, p_terminal: terminal });
-    // Inspect the result: if recording the failure itself errored we cannot fix
-    // it here, but we never pretend it succeeded — the caller still gets a
-    // truthful error code.
-    if (r.error) return { ok: false, error: terminal ? code : "retry_required" };
+    // fail releases the lease atomically. If recording the failure itself
+    // errors we cannot fix it here (the lease will expire), but we never
+    // pretend it succeeded — the caller still gets a truthful error code.
+    await deps.rpc("fail_company_onboarding", {
+      p_onboarding: ob, p_error_code: code, p_terminal: terminal, p_processing_token: token,
+    });
     return { ok: false, error: terminal ? code : "retry_required" };
   };
 
   // Resume a retriable attempt: move it back to resolving_auth_user first.
   if (state === "failed_retriable") {
-    const rt = await deps.rpc("retry_company_onboarding", { p_onboarding: ob });
+    const rt = await deps.rpc("retry_company_onboarding", { p_onboarding: ob, p_processing_token: token });
     if (rt.error) return { ok: false, error: toSafeError(rt.error.message) };
     state = rt.data.state;
   }
 
-  // Forward marker; tolerate only an already-advanced state (verified by re-read).
+  // Forward marker; tolerate an error only when a re-read confirms the state
+  // is already at/past the target (idempotent replay of our own step).
   const advance = async (to: string): Promise<{ ok: boolean; error?: string }> => {
-    const r = await deps.rpc("advance_company_onboarding_state", { p_onboarding: ob, p_to: to });
+    const r = await deps.rpc("advance_company_onboarding_state", {
+      p_onboarding: ob, p_to: to, p_processing_token: token,
+    });
     if (!r.error) return { ok: true };
     const st = await deps.rpc("get_company_onboarding_status", { p_onboarding: ob });
     if (st.error) return { ok: false, error: toSafeError(st.error.message) };
@@ -116,7 +139,7 @@ export async function runCreateCompany(deps: Deps, input: NormalizedInput): Prom
     const inv = await deps.authAdmin.inviteUserByEmail(input.first_admin_email);
     if (inv.error || (!inv.userId && !inv.alreadyExists)) {
       // Ambiguous invite outcome: re-derive ownership by EXACT email (bound to
-      // the onboarding id). A user found only now is NOT ours; never delete.
+      // the onboarding id). A user found only now is NOT ours; it is preserved.
       const re = await deps.rpc("lookup_onboarding_email", { p_onboarding: ob });
       if (re.error) return failOnboarding(toSafeError(re.error.message), false);
       const rcls: string = re.data.classification;
@@ -143,12 +166,14 @@ export async function runCreateCompany(deps: Deps, input: NormalizedInput): Prom
 
   const link = await deps.rpc("link_first_company_admin", {
     p_onboarding: ob, p_auth_user_id: authUserId, p_created_by_us: createdByUs,
+    p_processing_token: token,
   });
   if (link.error) {
     const code = toSafeError(link.error.message);
     if (code === "email_already_linked") return failOnboarding("email_already_linked", true);
     // The link RPC may have COMMITTED while its response was lost/timed out.
-    // Re-read the authoritative state before deciding — and NEVER delete.
+    // Re-read the authoritative state before deciding — the Auth user is
+    // preserved either way.
     const st = await deps.rpc("get_company_onboarding_status", { p_onboarding: ob });
     const re = await deps.rpc("lookup_onboarding_email", { p_onboarding: ob });
     if (st.error || re.error) return failOnboarding("retry_required", false);         // cannot verify; preserve + retriable
@@ -167,12 +192,14 @@ export async function runCreateCompany(deps: Deps, input: NormalizedInput): Prom
   }
   const rec = await deps.rpc("record_admin_setup_email_result", {
     p_onboarding: ob, p_result_status: emailStatus,
-    p_safe_error_code: emailStatus === "failed" ? "setup_email_failed" : null, p_is_retry: false,
+    p_safe_error_code: emailStatus === "failed" ? "setup_email_failed" : null,
+    p_is_retry: false, p_processing_token: token,
   });
   if (rec.error) emailStatus = "uncertain";   // attempted but not recorded — reported honestly, never as success
 
-  // 5) Activate (the RPC verifies the linked active admin before flipping status).
-  const done = await deps.rpc("complete_company_onboarding", { p_onboarding: ob });
+  // 5) Activate (the RPC verifies the linked active admin before flipping
+  //    status, and releases the lease atomically on success).
+  const done = await deps.rpc("complete_company_onboarding", { p_onboarding: ob, p_processing_token: token });
   if (done.error) return failOnboarding(toSafeError(done.error.message), false);
 
   return ok(done.data, input, emailStatus);
@@ -181,17 +208,36 @@ export async function runCreateCompany(deps: Deps, input: NormalizedInput): Prom
 // Resend a password-setup email for an existing onboarding. Always uses the
 // recovery email (never invite, never auth.resend), via the anon/caller client.
 // The target RPCs reject any onboarding whose admin is not genuinely linked.
+// Also claims the processing lease so a concurrent create/resend cannot
+// interleave, and releases it explicitly (recording an email result is not a
+// terminal outcome).
 export async function runSendSetupEmail(deps: Deps, onboardingId: string): Promise<Outcome> {
+  const token = newProcessingToken();
+  const claim = await deps.rpc("claim_company_onboarding_processing", {
+    p_onboarding: onboardingId, p_processing_token: token,
+  });
+  if (claim.error) return { ok: false, error: toSafeError(claim.error.message) };
+
+  const release = async () => {
+    await deps.rpc("release_company_onboarding_processing", {
+      p_onboarding: onboardingId, p_processing_token: token,
+    });
+    // A release error is not silently upgraded to success or failure of the
+    // resend itself; the lease simply expires.
+  };
+
   const tgt = await deps.rpc("get_onboarding_setup_target", { p_onboarding: onboardingId });
-  if (tgt.error) return { ok: false, error: toSafeError(tgt.error.message) };
+  if (tgt.error) { await release(); return { ok: false, error: toSafeError(tgt.error.message) }; }
   const email: string = tgt.data.admin_email_normalized;
 
   const em = await deps.sendRecoveryEmail(email);
   const status = em && em.error ? "failed" : "requested";
   const rec = await deps.rpc("record_admin_setup_email_result", {
     p_onboarding: onboardingId, p_result_status: status,
-    p_safe_error_code: status === "failed" ? "setup_email_failed" : null, p_is_retry: true,
+    p_safe_error_code: status === "failed" ? "setup_email_failed" : null,
+    p_is_retry: true, p_processing_token: token,
   });
+  await release();
   if (rec.error) return { ok: false, error: toSafeError(rec.error.message) };   // do not falsely report recorded
   return { ok: true, result: { setup_email_status: status } };
 }

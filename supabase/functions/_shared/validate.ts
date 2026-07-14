@@ -90,3 +90,34 @@ export const SAFE_TO_LINK = new Set(["unlinked_inactive", "linked_this_company_a
 export const UNSAFE_CLASSIFICATIONS = new Set([
   "linked_other_company", "is_app_admin", "active_other_role",
 ]);
+
+// ---- Edge Function configuration ----
+// SET_PASSWORD_URL is REQUIRED and validated at function startup. It is a full
+// URL including the GitHub Pages repository path — the HTTP origin
+// (ALLOWED_ORIGIN) alone is NOT enough, because the app lives under
+// /anthropic-claude-code-ide/, not at the origin root. There is deliberately
+// no fallback derived from ALLOWED_ORIGIN. The value always comes from
+// server-side env secrets; a redirect URL is never accepted from the request
+// body.
+export interface FunctionConfig {
+  allowedOrigin: string;
+  setPasswordUrl: string;
+}
+
+export function readConfig(env: Record<string, string | undefined>): FunctionConfig {
+  const allowedOrigin = (env.ALLOWED_ORIGIN || "").trim();
+  const setPasswordUrl = (env.SET_PASSWORD_URL || "").trim();
+  if (!allowedOrigin) throw new Error("config_error: ALLOWED_ORIGIN is required");
+  if (!setPasswordUrl) throw new Error("config_error: SET_PASSWORD_URL is required");
+  let u: URL;
+  try {
+    u = new URL(setPasswordUrl);
+  } catch (_) {
+    throw new Error("config_error: SET_PASSWORD_URL is not a valid URL");
+  }
+  const isLocal = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  if (u.protocol !== "https:" && !isLocal) {
+    throw new Error("config_error: SET_PASSWORD_URL must be https outside local development");
+  }
+  return { allowedOrigin, setPasswordUrl };
+}

@@ -24,12 +24,13 @@ select 'A1b setup_email_status values' as check,
 from pg_enum e join pg_type t on t.oid=e.enumtypid where t.typname='setup_email_status';
 -- expect: not_attempted,requested,failed,uncertain
 
-select 'A2 company_onboarding key columns present' as check, count(*) as should_be_10
+select 'A2 company_onboarding key columns present' as check, count(*) as should_be_13
 from information_schema.columns
 where table_schema='public' and table_name='company_onboarding'
   and column_name in ('idempotency_key','request_fingerprint','requested_by','state',
       'resume_from_state','auth_user_id','auth_user_created_by_us','setup_email_status',
-      'setup_email_attempt_count','setup_email_error_code');
+      'setup_email_attempt_count','setup_email_error_code',
+      'processing_token','processing_started_at','processing_expires_at');
 
 select 'A3 idempotency key is unique' as check, count(*) as should_be_1
 from pg_indexes where schemaname='public' and tablename='company_onboarding'
@@ -49,13 +50,14 @@ select 'A4c authenticated grant on onboarding (SELECT only)' as check,
 from information_schema.role_table_grants
 where table_schema='public' and table_name='company_onboarding' and grantee='authenticated';
 
-select 'A5 onboarding RPCs present' as check, count(*) as should_be_10
+select 'A5 onboarding RPCs present' as check, count(*) as should_be_12
 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
 where n.nspname='public' and p.proname in (
   'begin_company_onboarding','advance_company_onboarding_state','lookup_onboarding_email',
   'link_first_company_admin','complete_company_onboarding','fail_company_onboarding',
   'retry_company_onboarding','record_admin_setup_email_result','get_company_onboarding_status',
-  'get_onboarding_setup_target');
+  'get_onboarding_setup_target','claim_company_onboarding_processing',
+  'release_company_onboarding_processing');
 
 select 'A5b locked search_path (expect {search_path=pg_catalog})' as check, p.proname, p.proconfig
 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
@@ -112,7 +114,7 @@ rollback;
 -- ---------- B-MATRIX: existing email linked elsewhere is rejected ----------
 begin;
 do $$
-declare j jsonb; ob uuid; co uuid; other uuid := gen_random_uuid(); othc uuid := gen_random_uuid();
+declare j jsonb; ob uuid; co uuid; other uuid := gen_random_uuid(); othc uuid := gen_random_uuid(); tk uuid := gen_random_uuid();
 begin
   -- Setup an existing user linked to ANOTHER company, as a trusted context
   -- (auth.uid() null is the profile-guard's sanctioned setup path).
@@ -124,8 +126,9 @@ begin
   perform set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
   j := public.begin_company_onboarding(gen_random_uuid(),'Rej Co','REJ24','UTC','n','taken24@new.co');
   ob := (j->>'onboarding_id')::uuid;
+  perform public.claim_company_onboarding_processing(ob, tk);
   if public.lookup_onboarding_email(ob)->>'classification' <> 'linked_other_company' then raise exception 'FAIL: classification'; end if;
-  begin perform public.link_first_company_admin(ob, other, false);
+  begin perform public.link_first_company_admin(ob, other, false, tk);
         raise exception 'FAIL: linked a user from another company';
   exception when others then if sqlerrm <> 'email_already_linked' then raise; end if; end;
   raise notice 'PASS B-MATRIX: email linked to another company -> email_already_linked';
@@ -135,23 +138,24 @@ rollback;
 -- ---------- B-HAPPY: new user -> link -> activate; gate + email separation --
 begin;
 do $$
-declare j jsonb; ob uuid; co uuid; nu uuid := gen_random_uuid(); p public.profiles; c public.companies;
+declare j jsonb; ob uuid; co uuid; nu uuid := gen_random_uuid(); tk uuid := gen_random_uuid(); p public.profiles; c public.companies;
 begin
   perform set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
   j := public.begin_company_onboarding(gen_random_uuid(),'Happy Co','HAPPY24','UTC','Ha Admin','happy24@new.co');
   ob := (j->>'onboarding_id')::uuid; co := (j->>'company_id')::uuid;
+  perform public.claim_company_onboarding_processing(ob, tk);
   -- activation is impossible before admin_linked
-  begin perform public.complete_company_onboarding(ob); raise exception 'FAIL: activated before link';
+  begin perform public.complete_company_onboarding(ob, tk); raise exception 'FAIL: activated before link';
   exception when others then if sqlerrm <> 'invalid_state_transition' then raise; end if; end;
   -- simulate Auth invite creating the user (trigger makes an inactive outlet profile)
   insert into auth.users (id,email) values (nu,'happy24@new.co');
-  j := public.link_first_company_admin(ob, nu, true);
+  j := public.link_first_company_admin(ob, nu, true, tk);
   if j->>'state' <> 'admin_linked' then raise exception 'FAIL: not admin_linked'; end if;
   -- link must NOT claim an email was sent
   if (j->>'setup_email_status') <> 'not_attempted' then raise exception 'FAIL: link touched email status'; end if;
   -- record a FAILED setup email; it must not block activation
-  perform public.record_admin_setup_email_result(ob,'failed','smtp_down',false);
-  j := public.complete_company_onboarding(ob);
+  perform public.record_admin_setup_email_result(ob,'failed','smtp_down',false,tk);
+  j := public.complete_company_onboarding(ob, tk);
   select * into c from public.companies where id=co;
   select * into p from public.profiles where user_id=nu;
   if j->>'state' <> 'completed' or c.status <> 'active'
@@ -199,31 +203,57 @@ reset role; rollback;
 -- ---------- B-EMAIL-GATE: setup-email ops rejected before admin_linked ----------
 begin;
 do $$
-declare j jsonb; ob uuid;
+declare j jsonb; ob uuid; tk uuid := gen_random_uuid();
 begin
   perform set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
   j := public.begin_company_onboarding(gen_random_uuid(),'Gate Co','GATE24','UTC','n','gate24@new.co');
   ob := (j->>'onboarding_id')::uuid;   -- state = company_created (no admin yet)
+  perform public.claim_company_onboarding_processing(ob, tk);
   begin perform public.get_onboarding_setup_target(ob); raise exception 'FAIL: setup target before link';
   exception when others then if sqlerrm <> 'admin_not_linked' then raise; end if; end;
-  begin perform public.record_admin_setup_email_result(ob,'requested',null,false); raise exception 'FAIL: email result before link';
+  begin perform public.record_admin_setup_email_result(ob,'requested',null,false,tk); raise exception 'FAIL: email result before link';
   exception when others then if sqlerrm <> 'admin_not_linked' then raise; end if; end;
   raise notice 'PASS B-EMAIL-GATE: setup-email target + record rejected before admin_linked';
+end $$;
+rollback;
+
+-- ---------- B-LEASE: processing lease serializes executions ----------
+begin;
+do $$
+declare j jsonb; ob uuid; t1 uuid := gen_random_uuid(); t2 uuid := gen_random_uuid();
+begin
+  perform set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+  j := public.begin_company_onboarding(gen_random_uuid(),'Lease Co','LEASE24','UTC','n','lease24@new.co');
+  ob := (j->>'onboarding_id')::uuid;
+  perform public.claim_company_onboarding_processing(ob, t1);
+  -- an active lease cannot be stolen
+  begin perform public.claim_company_onboarding_processing(ob, t2); raise exception 'FAIL: lease stolen';
+  exception when others then if sqlerrm <> 'onboarding_in_progress' then raise; end if; end;
+  -- a wrong token cannot mutate state
+  begin perform public.advance_company_onboarding_state(ob,'resolving_auth_user', t2); raise exception 'FAIL: wrong token advanced';
+  exception when others then if sqlerrm <> 'onboarding_in_progress' then raise; end if; end;
+  -- an expired lease is reclaimable (trusted context simulates expiry)
+  perform set_config('request.jwt.claim.sub', '', true);
+  update public.company_onboarding set processing_expires_at = now() - interval '1 second' where id = ob;
+  perform set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
+  perform public.claim_company_onboarding_processing(ob, t2);
+  raise notice 'PASS B-LEASE: active lease exclusive; wrong token blocked; expired lease reclaimable';
 end $$;
 rollback;
 
 -- ---------- B-AUDIT: onboarding audit rows carry no secrets ----------
 begin;
 do $$
-declare j jsonb; ob uuid; nu uuid := gen_random_uuid();
+declare j jsonb; ob uuid; nu uuid := gen_random_uuid(); tk uuid := gen_random_uuid();
 begin
   perform set_config('request.jwt.claim.sub', 'REPLACE_APP_ADMIN_UUID', true);
   j := public.begin_company_onboarding(gen_random_uuid(),'Aud Co','AUDIT24','UTC','Au','audit24@new.co');
   ob := (j->>'onboarding_id')::uuid;
+  perform public.claim_company_onboarding_processing(ob, tk);
   insert into auth.users (id,email) values (nu,'audit24@new.co');
-  perform public.link_first_company_admin(ob, nu, true);
-  perform public.record_admin_setup_email_result(ob,'requested',null,false);
-  perform public.complete_company_onboarding(ob);
+  perform public.link_first_company_admin(ob, nu, true, tk);
+  perform public.record_admin_setup_email_result(ob,'requested',null,false,tk);
+  perform public.complete_company_onboarding(ob, tk);
   if exists (select 1 from public.platform_audit_log
              where (details->>'onboarding_id')::uuid = ob
                and details::text ~* '(password|secret|service_role|access_token|refresh_token|https?://)')

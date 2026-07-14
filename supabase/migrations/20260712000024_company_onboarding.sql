@@ -152,6 +152,13 @@ create table if not exists public.company_onboarding (
   setup_email_attempt_count integer not null default 0,
   setup_email_requested_at timestamptz,
   setup_email_error_code   text,
+  -- Processing lease: only ONE Edge Function execution may drive an onboarding
+  -- at a time. The token is generated SERVER-SIDE by the Edge Function (never
+  -- accepted from the browser); every state-mutating RPC verifies it. Expiry
+  -- lets a later execution recover after a crash.
+  processing_token         uuid,
+  processing_started_at    timestamptz,
+  processing_expires_at    timestamptz,
   error_code               text,
   safe_error_message       text,
   created_at               timestamptz not null default now(),
@@ -297,10 +304,85 @@ begin
 end;
 $$;
 
+-- True only when p_token is the CURRENT, UNEXPIRED lease on the onboarding row.
+create or replace function app.onboarding_owner_ok(p public.company_onboarding, p_token uuid)
+returns boolean
+language sql
+stable
+set search_path = pg_catalog
+as $$
+  select p_token is not null
+     and p.processing_token = p_token
+     and p.processing_expires_at > now();
+$$;
+
+-- ---- 4d) Processing lease ---------------------------------------------------
+-- claim: acquire (or re-acquire/extend with the same token) the exclusive right
+-- to drive this onboarding. A different, unexpired token -> onboarding_in_progress.
+-- failed_terminal is a sink and cannot be claimed. completed IS claimable (the
+-- resend flow records email results on completed onboardings); the create
+-- orchestrator returns a completed replay BEFORE claiming, so replays do no work.
+create or replace function public.claim_company_onboarding_processing(
+  p_onboarding uuid, p_processing_token uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare v_ob public.company_onboarding;
+begin
+  if not app.is_app_admin() then raise exception 'not_allowed'; end if;
+  if p_processing_token is null then raise exception 'invalid_input'; end if;
+  select * into v_ob from public.company_onboarding where id = p_onboarding for update;
+  if not found then raise exception 'invalid_input'; end if;
+  if v_ob.state = 'failed_terminal' then raise exception 'invalid_state_transition'; end if;
+  if v_ob.processing_token is not null
+     and v_ob.processing_token <> p_processing_token
+     and v_ob.processing_expires_at > now() then
+    raise exception 'onboarding_in_progress';
+  end if;
+  update public.company_onboarding
+     set processing_token = p_processing_token,
+         processing_started_at = now(),
+         processing_expires_at = now() + interval '2 minutes',
+         updated_at = now()
+   where id = v_ob.id returning * into v_ob;
+  return app.onboarding_status_json(v_ob);
+end;
+$$;
+
+-- release: drop the lease. Idempotent when already released; a mismatched token
+-- cannot release someone else's lease. complete/fail release automatically, so
+-- this is mainly for flows that end without a terminal outcome (e.g. resend).
+create or replace function public.release_company_onboarding_processing(
+  p_onboarding uuid, p_processing_token uuid)
+returns jsonb
+language plpgsql
+security definer
+set search_path = pg_catalog
+as $$
+declare v_ob public.company_onboarding;
+begin
+  if not app.is_app_admin() then raise exception 'not_allowed'; end if;
+  if p_processing_token is null then raise exception 'invalid_input'; end if;
+  select * into v_ob from public.company_onboarding where id = p_onboarding for update;
+  if not found then raise exception 'invalid_input'; end if;
+  if v_ob.processing_token is null then return app.onboarding_status_json(v_ob); end if;
+  if v_ob.processing_token <> p_processing_token then raise exception 'onboarding_in_progress'; end if;
+  update public.company_onboarding
+     set processing_token = null, processing_started_at = null,
+         processing_expires_at = null, updated_at = now()
+   where id = v_ob.id returning * into v_ob;
+  return app.onboarding_status_json(v_ob);
+end;
+$$;
+
 -- ---- 5) begin_company_onboarding -----------------------------------------
 -- Idempotent reservation. Creates EXACTLY ONE company (pending_setup) per key.
 -- Replay: same key + same actor + same normalized fingerprint resumes/returns;
 -- same key with a different actor or payload -> 'idempotency_conflict'.
+-- Takes NO processing token: it only reserves/reads; the caller claims the
+-- lease afterwards before doing any Auth or state-mutating work.
 create or replace function public.begin_company_onboarding(
   p_idempotency_key uuid, p_company_name text, p_company_code text,
   p_timezone text, p_admin_name text, p_admin_email text)
@@ -374,7 +456,7 @@ $$;
 -- Side-effect-free forward markers used by the Edge Function around the Auth
 -- step: company_created -> resolving_auth_user -> linking_profile.
 create or replace function public.advance_company_onboarding_state(
-  p_onboarding uuid, p_to public.onboarding_state)
+  p_onboarding uuid, p_to public.onboarding_state, p_processing_token uuid)
 returns jsonb
 language plpgsql
 security definer
@@ -385,6 +467,7 @@ begin
   if not app.is_app_admin() then raise exception 'not_allowed'; end if;
   select * into v_ob from public.company_onboarding where id = p_onboarding for update;
   if not found then raise exception 'invalid_input'; end if;
+  if not app.onboarding_owner_ok(v_ob, p_processing_token) then raise exception 'onboarding_in_progress'; end if;
 
   if not ((v_ob.state = 'company_created'     and p_to = 'resolving_auth_user')
        or (v_ob.state = 'resolving_auth_user' and p_to = 'linking_profile')) then
@@ -424,7 +507,7 @@ $$;
 -- existing-email matrix. Does NOT claim any email was sent. Sets admin_linked.
 -- p_created_by_us MUST be true only for a confirmed newly-created Auth user.
 create or replace function public.link_first_company_admin(
-  p_onboarding uuid, p_auth_user_id uuid, p_created_by_us boolean)
+  p_onboarding uuid, p_auth_user_id uuid, p_created_by_us boolean, p_processing_token uuid)
 returns jsonb
 language plpgsql
 security definer
@@ -441,6 +524,7 @@ begin
 
   select * into v_ob from public.company_onboarding where id = p_onboarding for update;
   if not found then raise exception 'invalid_input'; end if;
+  if not app.onboarding_owner_ok(v_ob, p_processing_token) then raise exception 'onboarding_in_progress'; end if;
   perform 1 from public.companies where id = v_ob.company_id for update;
 
   -- Idempotent replay: already linked to this auth user.
@@ -503,7 +587,8 @@ $$;
 
 -- ---- 9) complete_company_onboarding ---------------------------------------
 -- Activates the company ONLY after fully verifying the linked active admin.
-create or replace function public.complete_company_onboarding(p_onboarding uuid)
+create or replace function public.complete_company_onboarding(
+  p_onboarding uuid, p_processing_token uuid)
 returns jsonb
 language plpgsql
 security definer
@@ -517,7 +602,8 @@ begin
   if not app.is_app_admin() then raise exception 'not_allowed'; end if;
   select * into v_ob from public.company_onboarding where id = p_onboarding for update;
   if not found then raise exception 'invalid_input'; end if;
-  if v_ob.state = 'completed' then return app.onboarding_status_json(v_ob); end if;   -- idempotent
+  if v_ob.state = 'completed' then return app.onboarding_status_json(v_ob); end if;   -- idempotent read, no mutation
+  if not app.onboarding_owner_ok(v_ob, p_processing_token) then raise exception 'onboarding_in_progress'; end if;
   if v_ob.state <> 'admin_linked' then raise exception 'invalid_state_transition'; end if;
 
   select * into v_co from public.companies where id = v_ob.company_id for update;
@@ -534,8 +620,10 @@ begin
   update public.companies set status = 'active' where id = v_ob.company_id;
   perform set_config('app.lifecycle_rpc', 'off', true);
 
+  -- Terminal success: release the processing lease atomically with completion.
   update public.company_onboarding
-     set state = 'completed', completed_at = now(), updated_at = now()
+     set state = 'completed', completed_at = now(), updated_at = now(),
+         processing_token = null, processing_started_at = null, processing_expires_at = null
    where id = v_ob.id returning * into v_ob;
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, target_user_id, details)
@@ -548,7 +636,7 @@ $$;
 
 -- ---- 10) fail / retry -----------------------------------------------------
 create or replace function public.fail_company_onboarding(
-  p_onboarding uuid, p_error_code text, p_terminal boolean)
+  p_onboarding uuid, p_error_code text, p_terminal boolean, p_processing_token uuid)
 returns jsonb
 language plpgsql
 security definer
@@ -560,14 +648,18 @@ begin
   select * into v_ob from public.company_onboarding where id = p_onboarding for update;
   if not found then raise exception 'invalid_input'; end if;
   if v_ob.state in ('completed', 'failed_terminal') then raise exception 'invalid_state_transition'; end if;
+  if not app.onboarding_owner_ok(v_ob, p_processing_token) then raise exception 'onboarding_in_progress'; end if;
 
   v_new := case when coalesce(p_terminal, false) then 'failed_terminal'::public.onboarding_state
                 else 'failed_retriable'::public.onboarding_state end;
 
+  -- Terminal outcome for this execution: release the lease atomically so a
+  -- later retry (failed_retriable) can claim it fresh.
   update public.company_onboarding
      set state = v_new, resume_from_state = v_ob.state,
          error_code = left(coalesce(p_error_code, 'onboarding_failed'), 64),
-         updated_at = now()
+         updated_at = now(),
+         processing_token = null, processing_started_at = null, processing_expires_at = null
    where id = v_ob.id returning * into v_ob;
 
   insert into public.platform_audit_log (actor_user_id, action, target_company_id, details)
@@ -578,7 +670,8 @@ begin
 end;
 $$;
 
-create or replace function public.retry_company_onboarding(p_onboarding uuid)
+create or replace function public.retry_company_onboarding(
+  p_onboarding uuid, p_processing_token uuid)
 returns jsonb
 language plpgsql
 security definer
@@ -589,6 +682,7 @@ begin
   if not app.is_app_admin() then raise exception 'not_allowed'; end if;
   select * into v_ob from public.company_onboarding where id = p_onboarding for update;
   if not found then raise exception 'invalid_input'; end if;
+  if not app.onboarding_owner_ok(v_ob, p_processing_token) then raise exception 'onboarding_in_progress'; end if;
   if v_ob.state <> 'failed_retriable' then raise exception 'invalid_state_transition'; end if;
 
   update public.company_onboarding
@@ -609,7 +703,7 @@ $$;
 -- Auth API call is recorded as 'requested', never 'sent'/'delivered'.
 create or replace function public.record_admin_setup_email_result(
   p_onboarding uuid, p_result_status public.setup_email_status,
-  p_safe_error_code text, p_is_retry boolean)
+  p_safe_error_code text, p_is_retry boolean, p_processing_token uuid)
 returns jsonb
 language plpgsql
 security definer
@@ -622,6 +716,7 @@ begin
 
   select * into v_ob from public.company_onboarding where id = p_onboarding for update;
   if not found then raise exception 'invalid_input'; end if;
+  if not app.onboarding_owner_ok(v_ob, p_processing_token) then raise exception 'onboarding_in_progress'; end if;
   -- Setup-email operations are only valid once the admin is genuinely linked.
   if v_ob.state not in ('admin_linked', 'completed') or not app.onboarding_admin_linked_ok(v_ob) then
     raise exception 'admin_not_linked';
@@ -698,13 +793,15 @@ declare fn text;
 begin
   foreach fn in array array[
     'public.begin_company_onboarding(uuid,text,text,text,text,text)',
-    'public.advance_company_onboarding_state(uuid,public.onboarding_state)',
+    'public.claim_company_onboarding_processing(uuid,uuid)',
+    'public.release_company_onboarding_processing(uuid,uuid)',
+    'public.advance_company_onboarding_state(uuid,public.onboarding_state,uuid)',
     'public.lookup_onboarding_email(uuid)',
-    'public.link_first_company_admin(uuid,uuid,boolean)',
-    'public.complete_company_onboarding(uuid)',
-    'public.fail_company_onboarding(uuid,text,boolean)',
-    'public.retry_company_onboarding(uuid)',
-    'public.record_admin_setup_email_result(uuid,public.setup_email_status,text,boolean)',
+    'public.link_first_company_admin(uuid,uuid,boolean,uuid)',
+    'public.complete_company_onboarding(uuid,uuid)',
+    'public.fail_company_onboarding(uuid,text,boolean,uuid)',
+    'public.retry_company_onboarding(uuid,uuid)',
+    'public.record_admin_setup_email_result(uuid,public.setup_email_status,text,boolean,uuid)',
     'public.get_company_onboarding_status(uuid)',
     'public.get_onboarding_setup_target(uuid)'
   ] loop
@@ -717,3 +814,4 @@ revoke all on function app.onboarding_normalize(text,text,text,text,text) from p
 revoke all on function app.onboarding_classify(public.company_onboarding) from public, anon;
 revoke all on function app.onboarding_status_json(public.company_onboarding) from public, anon;
 revoke all on function app.onboarding_admin_linked_ok(public.company_onboarding) from public, anon;
+revoke all on function app.onboarding_owner_ok(public.company_onboarding, uuid) from public, anon;
