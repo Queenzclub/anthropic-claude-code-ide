@@ -1,4 +1,4 @@
-# Edge Functions — Secure Company Onboarding (Stage 4B-1)
+# Edge Functions — Secure Company Onboarding (Stage 4B)
 
 These functions let the dedicated **App Admin** onboard a new company without
 ever exposing `service_role` in the browser. **They are not deployed yet** and
@@ -12,11 +12,34 @@ change is approved.
   lease → resolve/invite the first admin's Auth user →
   `link_first_company_admin` → `complete_company_onboarding`. Returns only safe
   fields (`company_id`, `company_code`, `status`, `admin_email`,
-  `setup_email_status`).
+  `setup_email_status`). Since the Stage 4B security amendment (Migration 25),
+  `link_first_company_admin` leaves the first-admin profile **inactive** and
+  `complete_company_onboarding` activates the company while the admin still
+  awaits password setup.
 - **`send-admin-setup-email`** — re-sends the first admin's password-setup
   email (recovery email) for an existing onboarding whose admin is already
   linked. Never invites, never `auth.resend()`, never returns a link. Uses no
   service-role key at all.
+- **`complete-first-admin-setup`** — the **database-enforced setup boundary**
+  (Migration 25). Called by the invited first admin from `set-password.html`
+  with a **fresh password-authenticated session** (obtained via
+  `signInWithPassword` after `updateUser`). It forwards that token to the
+  protected `finalize_first_admin_setup()` RPC, which requires the AMR password
+  proof (`amr` contains `method='password'` — an invite/recovery `otp` session
+  is rejected with `setup_proof_required`), then activates **only the caller's
+  own** profile and stamps `admin_setup_completed_at`. **No service-role client
+  at all** — everything runs under the caller's JWT; the RPC authorizes via
+  `auth.uid()`. Returns only `{ finalized, already_completed }`.
+
+### Why the password proof is AMR, not `encrypted_password`
+
+Verified against a local GoTrue (Supabase Auth) v2.174.0 runtime: an
+invite/recovery session carries `amr = [{ "method": "otp" }]`, while a fresh
+`signInWithPassword` session carries `amr = [{ "method": "password" }]`, and
+`updateUser({ password })` does **not** upgrade the held invite token's `amr`.
+So finalization depends on a genuine password session (proven server-side from
+`request.jwt.claims`) — never on `auth.users.encrypted_password`, which is an
+internal Auth storage field, not a stable security contract.
 
 Shared logic lives in `_shared/` and is unit-tested in
 `tests/onboarding_logic_test.ts` (runs under Deno or
@@ -61,24 +84,32 @@ ALLOWED_ORIGIN     = https://queenzclub.github.io
 SET_PASSWORD_URL   = https://queenzclub.github.io/anthropic-claude-code-ide/set-password.html
 ```
 
+`complete-first-admin-setup` needs only `SUPABASE_URL`, `SUPABASE_ANON_KEY`,
+and `ALLOWED_ORIGIN` (no service-role, no `SET_PASSWORD_URL`).
+
 Local development may point `ALLOWED_ORIGIN` / `SET_PASSWORD_URL` at a
 localhost origin (http is accepted for localhost only).
 
-## Live configuration still required (before deploy — not part of 4B-1)
+## Live configuration still required (before deploy)
 
-1. Apply **Migration 24** and run `supabase/tests/verify_migration_24.sql`.
+1. Apply **Migration 24** then **Migration 25** and run
+   `supabase/tests/verify_migration_24.sql` and `verify_migration_25.sql`.
 2. **Inspect the project's API-key type** (legacy JWT anon/service vs new
    publishable/secret) and set `verify_jwt` accordingly. Regardless of that
    setting, these functions require a bearer, validate it with `auth.getUser()`,
-   and re-check `app_admin` in the DB.
+   and (for the two app_admin functions) re-check `app_admin` in the DB;
+   `complete-first-admin-setup` instead lets the `finalize_first_admin_setup()`
+   RPC authorize the caller via `auth.uid()` + the AMR password proof.
 3. Configure **custom SMTP** in Supabase Auth (the default sender is
    rate-limited).
 4. Add the PWA origin + `set-password.html` (full path above) to Auth
    **Site URL** and **Redirect URLs**.
-5. `supabase secrets set …` (above), then `supabase functions deploy
-   create-company send-admin-setup-email`.
-6. Build the Stage 4B-2 frontend (`set-password.html` + Create Company form),
-   then test a throwaway onboarding end-to-end.
+5. `supabase secrets set …` (above), then deploy **all three** functions
+   together — the finalization path must be live before any invitation is sent:
+   `supabase functions deploy create-company send-admin-setup-email complete-first-admin-setup`.
+6. Verify backend health **without sending an invitation**, then ship the Stage
+   4B-2 frontend (`fleetboard-v21`) and test a throwaway onboarding end-to-end,
+   confirming the pre-finalization admin is blocked from the app.
 
 CORS is restricted to `ALLOWED_ORIGIN`; `OPTIONS` is handled; bodies must be
 `application/json` and are size-capped.

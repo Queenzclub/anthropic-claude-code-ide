@@ -25,7 +25,8 @@ var OB_POLL_MAX_MS = window.__OB_POLL_MAX_MS || 120000; // 2 minutes
 // Read-only columns only — never processing_token.
 var OB_COLS = 'id, company_id, state, setup_email_status, setup_email_attempt_count, ' +
   'error_code, idempotency_key, company_name, company_code, timezone, admin_name, ' +
-  'admin_email_normalized, processing_expires_at, created_at, updated_at, completed_at';
+  'admin_email_normalized, processing_expires_at, setup_started_at, ' +
+  'admin_setup_completed_at, created_at, updated_at, completed_at';
 
 var OB_ERROR_MESSAGES = {
   invalid_input: 'Please check the form — one of the fields is invalid.',
@@ -43,6 +44,19 @@ var OB_ERROR_MESSAGES = {
 };
 function obMessage(code) {
   return OB_ERROR_MESSAGES[code] || OB_ERROR_MESSAGES.onboarding_failed;
+}
+
+// Deployment-mismatch guard: true when the onboarding backend (Migration 24/25
+// objects) is not present live. Prevents exposing the Create Company UI or
+// querying missing objects when the frontend ships ahead of the backend.
+function obBackendMissing(err) {
+  if (!err) return false;
+  var code = err.code || '';
+  var msg = (err.message || '').toLowerCase();
+  return code === 'PGRST205' || code === '42P01' ||
+    msg.indexOf('does not exist') !== -1 ||
+    msg.indexOf('could not find the table') !== -1 ||
+    msg.indexOf("relation") !== -1 && msg.indexOf('does not exist') !== -1;
 }
 
 // A compact, searchable set of IANA zones (native datalist filters as you type).
@@ -430,6 +444,15 @@ function initOnboarding(ctx) {
       html += stepHtml('○', 'Setup email not requested yet', 'pending');
     }
     html += stepHtml(row.state === 'completed' ? '✅' : '○', 'Company activated', row.state === 'completed' ? 'done' : 'pending');
+    // First-admin password setup is DERIVED (Migration 25): once the company is
+    // active, the admin is still inactive until they finish setting a password.
+    if (row.state === 'completed') {
+      if (row.admin_setup_completed_at) {
+        html += stepHtml('✅', 'Account setup completed', 'done');
+      } else {
+        html += stepHtml('⏳', 'Account setup pending', 'warn');
+      }
+    }
     if (failed) {
       html += stepHtml('❌', (row.state === 'failed_terminal' ? 'Failed' : 'Failed — retry available') +
         (row.error_code ? ': ' + escapeHtml(obMessage(row.error_code)) : ''), 'fail');
@@ -525,20 +548,33 @@ function initOnboarding(ctx) {
   window.onboardingDecorate = decorateList;
   window.onboardingDetail = renderDetailTimeline;
 
-  // ---------- init: render + reload recovery ----------
+  // ---------- init: probe backend, then render + reload recovery ----------
+  // Probe the onboarding backend FIRST. If Migration 24/25 objects are not live
+  // (frontend shipped ahead of backend), keep the Create Company UI disabled and
+  // do not query missing objects — degrade safely instead of exposing a broken
+  // half-feature.
+  (async function () {
+    var probe = await window.sb.from('company_onboarding').select('id').limit(1);
+    if (probe.error && obBackendMissing(probe.error)) {
+      host.innerHTML =
+        '<div class="detail-group"><h4>🏢 Create Company</h4>' +
+        '<p class="muted small">Company onboarding is not available right now.</p></div>';
+      return;   // no form, no further queries, hooks stay no-op on empty rows
+    }
 
-  renderForm();
-  refreshRows();
+    renderForm();
+    refreshRows();
 
-  var d = state.draft;
-  if (d && d.state === 'submitting' && d.key) {
-    // Reload mid-submission: reconnect read-only with the SAME key.
-    formMsg('⏳ Reconnecting to your in-flight onboarding…', 'alert-warn');
-    reconnect(d.key);
-  } else if (d && d.state === 'failed') {
-    formMsg(escapeHtml(obMessage('retry_required')) +
-      ' <button id="obRetry" class="btn btn-outline btn-small" type="button">Retry</button>');
-    var rb = document.getElementById('obRetry');
-    if (rb) rb.addEventListener('click', submit);
-  }
+    var d = state.draft;
+    if (d && d.state === 'submitting' && d.key) {
+      // Reload mid-submission: reconnect read-only with the SAME key.
+      formMsg('⏳ Reconnecting to your in-flight onboarding…', 'alert-warn');
+      reconnect(d.key);
+    } else if (d && d.state === 'failed') {
+      formMsg(escapeHtml(obMessage('retry_required')) +
+        ' <button id="obRetry" class="btn btn-outline btn-small" type="button">Retry</button>');
+      var rb = document.getElementById('obRetry');
+      if (rb) rb.addEventListener('click', submit);
+    }
+  })();
 }
