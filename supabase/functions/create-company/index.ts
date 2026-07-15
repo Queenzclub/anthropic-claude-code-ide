@@ -2,10 +2,11 @@
 //
 // Onboards a new company for the dedicated App Admin. Authorizes the caller's
 // bearer token, confirms an ACTIVE app_admin via the database, then runs the
-// protected onboarding workflow. The service-role key is used ONLY for the
-// Auth Admin API (invite / delete user); every DB/RPC call uses the caller's
-// forwarded JWT so app.is_app_admin() authorizes it server-side. No secrets or
-// links are ever returned to the browser.
+// protected onboarding workflow. The service-role key is used ONLY for
+// inviteUserByEmail — the workflow has no capability to remove Auth users.
+// Every DB/RPC call uses the caller's forwarded JWT so app.is_app_admin()
+// authorizes it server-side. No secrets or links are ever returned to the
+// browser.
 //
 // NOT DEPLOYED in Stage 4B-1. `verify_jwt` handling: see the note below.
 

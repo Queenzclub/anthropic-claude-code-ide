@@ -92,13 +92,30 @@ export async function runCreateCompany(deps: Deps, input: NormalizedInput): Prom
   if (claim.error) return { ok: false, error: toSafeError(claim.error.message) };
 
   const failOnboarding = async (code: string, terminal: boolean): Promise<Outcome> => {
-    // fail releases the lease atomically. If recording the failure itself
-    // errors we cannot fix it here (the lease will expire), but we never
-    // pretend it succeeded — the caller still gets a truthful error code.
-    await deps.rpc("fail_company_onboarding", {
+    // fail releases the lease atomically on success. Its result.error is
+    // INSPECTED, never discarded: the RPC may itself fail (lease lost, network,
+    // or the onboarding raced to a different state), so we only report the
+    // intended failure once the authoritative state confirms it was recorded.
+    const intended: Outcome = { ok: false, error: terminal ? code : "retry_required" };
+    const r = await deps.rpc("fail_company_onboarding", {
       p_onboarding: ob, p_error_code: code, p_terminal: terminal, p_processing_token: token,
     });
-    return { ok: false, error: terminal ? code : "retry_required" };
+    if (!r.error) return intended;
+    const st = await deps.rpc("get_company_onboarding_status", { p_onboarding: ob });
+    if (!st.error) {
+      if (st.data.state === "failed_retriable" || st.data.state === "failed_terminal") {
+        return intended;                       // the failure state committed (e.g. response lost)
+      }
+      if (st.data.state === "completed") {
+        return ok(st.data, input);             // unexpectedly completed — report the truth
+      }
+    }
+    if (toSafeError(r.error.message) === "onboarding_in_progress") {
+      return { ok: false, error: "onboarding_in_progress" };   // ownership was lost
+    }
+    // The failure state was NOT persisted — say retry_required without
+    // pretending it was recorded (never surface a terminal code here).
+    return { ok: false, error: "retry_required" };
   };
 
   // Resume a retriable attempt: move it back to resolving_auth_user first.
@@ -198,11 +215,35 @@ export async function runCreateCompany(deps: Deps, input: NormalizedInput): Prom
   if (rec.error) emailStatus = "uncertain";   // attempted but not recorded — reported honestly, never as success
 
   // 5) Activate (the RPC verifies the linked active admin before flipping
-  //    status, and releases the lease atomically on success).
+  //    status, and releases the lease atomically on success). complete may
+  //    COMMIT while its response is lost, so an error is never treated as a
+  //    failure until the authoritative state has been re-read.
   const done = await deps.rpc("complete_company_onboarding", { p_onboarding: ob, p_processing_token: token });
-  if (done.error) return failOnboarding(toSafeError(done.error.message), false);
+  if (!done.error) return ok(done.data, input, emailStatus);
 
-  return ok(done.data, input, emailStatus);
+  const st = await deps.rpc("get_company_onboarding_status", { p_onboarding: ob });
+  if (!st.error && st.data.state === "completed") {
+    // Completion committed; only the response was lost. Success — no failure
+    // RPC, no retry_required.
+    return ok(st.data, input, emailStatus);
+  }
+  if (!st.error && st.data.state === "admin_linked") {
+    // Still linkable and (if we hold the lease) safely retriable: one retry
+    // with the SAME token.
+    const again = await deps.rpc("complete_company_onboarding", { p_onboarding: ob, p_processing_token: token });
+    if (!again.error) return ok(again.data, input, emailStatus);
+    const st2 = await deps.rpc("get_company_onboarding_status", { p_onboarding: ob });
+    if (!st2.error && st2.data.state === "completed") return ok(st2.data, input, emailStatus);
+    if (toSafeError(again.error.message) === "onboarding_in_progress") {
+      // The lease expired or was replaced: another execution owns recovery now.
+      return { ok: false, error: "onboarding_in_progress" };
+    }
+    return failOnboarding(toSafeError(again.error.message), false);   // records only while we own the lease
+  }
+  if (toSafeError(done.error.message) === "onboarding_in_progress") {
+    return { ok: false, error: "onboarding_in_progress" };            // ownership lost; nothing recorded by us
+  }
+  return failOnboarding(toSafeError(done.error.message), false);
 }
 
 // Resend a password-setup email for an existing onboarding. Always uses the

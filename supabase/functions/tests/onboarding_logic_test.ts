@@ -37,6 +37,12 @@ interface FakeOpts {
   linkError?: string | null;
   linkCommitted?: boolean;          // link returns error but the RPC actually committed (lost response)
   completeError?: string | null;
+  completeCommitted?: boolean;      // complete returns error but the RPC actually committed (lost response)
+  completeErrorOnce?: string;       // only the FIRST complete call errors; the retry succeeds
+  loseLeaseBeforeComplete?: boolean; // lease expired/replaced before the completion step
+  failRpcError?: string;            // fail_company_onboarding resolves with an error object
+  failCommitted?: boolean;          // fail errors but the failure state actually committed
+  failLeaseLost?: boolean;          // fail errors with onboarding_in_progress (lease lost)
   recoveryError?: any;
   recordError?: boolean;            // record_admin_setup_email_result resolves with an error object
   advanceError?: boolean;           // advance resolves with an error object (not idempotent)
@@ -47,6 +53,7 @@ function makeDeps(o: FakeOpts) {
   let cur = o.beginState ?? "company_created";
   let lease: string | null = null;
   let lookIdx = 0;
+  let completeTried = false;
   const owned = (args: any) => lease !== null && args.p_processing_token === lease;
   const rpc = (fn: string, args: any): Promise<{ data: any; error: any }> => {
     calls.rpc.push(fn);
@@ -79,9 +86,12 @@ function makeDeps(o: FakeOpts) {
         cur = "admin_linked";
         return Promise.resolve({ data: { onboarding_id: "ob1", state: "admin_linked", setup_email_status: "not_attempted" }, error: null });
       case "get_company_onboarding_status":
-        return Promise.resolve({ data: { state: cur, error_code: o.beginErrorCode ?? null }, error: null });
+        return Promise.resolve({ data: { state: cur, error_code: o.beginErrorCode ?? null, company_id: "co1", company_code: "CODE", setup_email_status: "requested" }, error: null });
       case "complete_company_onboarding":
+        if (o.loseLeaseBeforeComplete) lease = "someone-else";
         if (!owned(args)) return Promise.resolve({ data: null, error: { message: "onboarding_in_progress" } });
+        if (o.completeCommitted) { cur = "completed"; lease = null; return Promise.resolve({ data: null, error: { message: "network reset" } }); }
+        if (o.completeErrorOnce && !completeTried) { completeTried = true; return Promise.resolve({ data: null, error: { message: o.completeErrorOnce } }); }
         if (o.completeError) return Promise.resolve({ data: null, error: { message: o.completeError } });
         cur = "completed"; lease = null;   // auto-release on success
         return Promise.resolve({ data: { company_id: "co1", company_code: "CODE", state: "completed" }, error: null });
@@ -89,7 +99,10 @@ function makeDeps(o: FakeOpts) {
         if (!owned(args)) return Promise.resolve({ data: null, error: { message: "onboarding_in_progress" } });
         return Promise.resolve(o.recordError ? { data: null, error: { message: "admin_not_linked" } } : { data: {}, error: null });
       case "fail_company_onboarding":
+        if (o.failLeaseLost) return Promise.resolve({ data: null, error: { message: "onboarding_in_progress" } });
         if (!owned(args)) return Promise.resolve({ data: null, error: { message: "onboarding_in_progress" } });
+        if (o.failCommitted) { cur = args.p_terminal ? "failed_terminal" : "failed_retriable"; lease = null; return Promise.resolve({ data: null, error: { message: "network reset" } }); }
+        if (o.failRpcError) return Promise.resolve({ data: null, error: { message: o.failRpcError } });
         cur = args.p_terminal ? "failed_terminal" : "failed_retriable"; lease = null;   // auto-release
         return Promise.resolve({ data: {}, error: null });
       case "get_onboarding_setup_target":
@@ -327,6 +340,88 @@ async function main() {
     const { deps, calls } = makeDeps({ classify: ["none"], invite: { userId: "u" }, completeError: "retry_required" });
     eq(await runCreateCompany(deps, V.value), { ok: false, error: "retry_required" }, "T22 complete failure -> retry_required");
     ok(calls.rpc.includes("fail_company_onboarding"), "T22 records the failure");
+  }
+
+  // T23 complete COMMITTED but response lost -> status re-read completed -> success, NO fail call
+  {
+    const { deps, calls } = makeDeps({ classify: ["none"], invite: { userId: "u" }, completeCommitted: true });
+    const r = await runCreateCompany(deps, V.value);
+    ok(r.ok && r.result.status === "active" && r.result.company_id === "co1" && r.result.company_code === "CODE",
+      "T23 committed-complete/lost-response -> correct company success result");
+    ok(!calls.rpc.includes("fail_company_onboarding"), "T23 no failure RPC after committed completion");
+  }
+
+  // T24 first complete errors, retry with the SAME token succeeds -> success
+  {
+    const { deps, calls } = makeDeps({ classify: ["none"], invite: { userId: "u" }, completeErrorOnce: "boom" });
+    const r = await runCreateCompany(deps, V.value);
+    ok(r.ok && r.result.status === "active", "T24 completion retry (same token) succeeds");
+    ok(calls.rpc.filter((f: string) => f === "complete_company_onboarding").length === 2
+      && !calls.rpc.includes("fail_company_onboarding"), "T24 exactly one retry, no failure RPC");
+  }
+
+  // T25 complete DEFINITELY fails (both attempts, lease owned) -> failed_retriable recorded
+  {
+    const { deps, calls } = makeDeps({ classify: ["none"], invite: { userId: "u" }, completeError: "retry_required" });
+    eq(await runCreateCompany(deps, V.value), { ok: false, error: "retry_required" }, "T25 definite complete failure -> retry_required");
+    ok(calls.rpc.includes("fail_company_onboarding"), "T25 failure recorded while lease owned");
+  }
+
+  // T26 lease expired/replaced before completion recovery -> onboarding_in_progress, nothing recorded by us
+  {
+    const { deps, calls } = makeDeps({ classify: ["none"], invite: { userId: "u" }, loseLeaseBeforeComplete: true });
+    eq(await runCreateCompany(deps, V.value), { ok: false, error: "onboarding_in_progress" }, "T26 lost lease at completion -> onboarding_in_progress");
+    const st = await deps.rpc("get_company_onboarding_status", { p_onboarding: "ob1" });
+    ok(st.data.state === "admin_linked", "T26 state untouched by the losing execution");
+  }
+
+  // T27 fail RPC errors but the failure state COMMITTED -> intended failure reported
+  {
+    const { deps } = makeDeps({ classify: ["none", "unlinked_inactive"], invite: { userId: "b" }, linkError: "invalid_input", failCommitted: true });
+    eq(await runCreateCompany(deps, V.value), { ok: false, error: "retry_required" }, "T27 fail committed despite lost response -> intended retry_required");
+    const st = await deps.rpc("get_company_onboarding_status", { p_onboarding: "ob1" });
+    ok(st.data.state === "failed_retriable", "T27 authoritative state is failed_retriable");
+  }
+
+  // T28 fail RPC errors and NO failure state exists -> retry_required, never the unconfirmed terminal code
+  {
+    const { deps } = makeDeps({ classify: ["linked_other_company"], failRpcError: "network down" });
+    eq(await runCreateCompany(deps, V.value), { ok: false, error: "retry_required" },
+      "T28 unpersisted terminal failure reported as retry_required (not email_already_linked)");
+  }
+
+  // T29 fail RPC fails because the lease was lost -> onboarding_in_progress
+  {
+    const { deps } = makeDeps({ classify: ["linked_other_company"], failLeaseLost: true });
+    eq(await runCreateCompany(deps, V.value), { ok: false, error: "onboarding_in_progress" }, "T29 lost lease at fail time -> onboarding_in_progress");
+  }
+
+  // T30 fail path discovers the onboarding already COMPLETED -> returns the success result
+  {
+    const deps: Deps = {
+      rpc: (fn) => {
+        switch (fn) {
+          case "begin_company_onboarding":
+            return Promise.resolve({ data: { onboarding_id: "ob1", company_id: "co1", company_code: "CODE", state: "company_created" }, error: null });
+          case "claim_company_onboarding_processing":
+          case "advance_company_onboarding_state":
+            return Promise.resolve({ data: {}, error: null });
+          case "lookup_onboarding_email":
+            return Promise.resolve({ data: { auth_user_id: "u9", classification: "linked_other_company" }, error: null });
+          case "fail_company_onboarding":
+            return Promise.resolve({ data: null, error: { message: "network" } });
+          case "get_company_onboarding_status":
+            return Promise.resolve({ data: { state: "completed", company_id: "co1", company_code: "CODE", setup_email_status: "requested" }, error: null });
+          default:
+            return Promise.resolve({ data: {}, error: null });
+        }
+      },
+      authAdmin: { inviteUserByEmail: () => { throw new Error("no invite"); } },
+      sendRecoveryEmail: () => { throw new Error("no email"); },
+    };
+    const r = await runCreateCompany(deps, V.value);
+    ok(r.ok && r.result.company_id === "co1" && r.result.status === "active",
+      "T30 fail path sees completed onboarding -> reports the true success");
   }
 
   console.log(`\n${passed} passed, ${failed} failed`);
