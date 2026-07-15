@@ -779,3 +779,21 @@ body.ready .loader { display: none; }
 .suspended-status { font-weight: 600; margin: 0 0 0.5rem; }
 .suspended-reason { color: var(--muted); margin: 0 0 0.75rem; }
 .suspended-card .btn { margin-top: 0.75rem; }
+
+/* ---------- Stage 4B-2: company onboarding + set-password ---------- */
+.ob-timeline { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.5rem 0 0.75rem; }
+.ob-step { display: flex; align-items: center; gap: 0.5rem; font-size: 0.92rem; }
+.ob-icon { width: 1.4rem; text-align: center; flex: none; }
+.ob-done { color: inherit; }
+.ob-pending { color: var(--muted); }
+.ob-warn { color: #ffd08a; }
+.ob-fail { color: #ffb3b5; }
+.ob-badge-slot { margin: 0.35rem 0 0.1rem; }
+.badge-busy { background: rgba(59, 130, 246, 0.16); color: #9cc4ff; border: 1px solid rgba(59, 130, 246, 0.5); }
+
+.setpw-main { display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+.setpw-card { max-width: 420px; width: 100%; text-align: center; }
+.setpw-card form { text-align: left; }
+.setpw-card .field { margin-bottom: 0.75rem; }
+.setpw-card .btn[type="submit"] { width: 100%; margin-top: 0.25rem; }
+.setpw-footer { margin-top: 1rem; }

@@ -12,12 +12,13 @@
 //
 // Bump CACHE_VERSION when deploying changes so old caches are cleared.
 
-var CACHE_VERSION = 'fleetboard-v19';
+var CACHE_VERSION = 'fleetboard-v20';
 
 var ASSETS = [
   './',
   'index.html',
   'app-admin.html',
+  'set-password.html',
   'admin.html',
   'manager.html',
   'outlet.html',
@@ -30,6 +31,8 @@ var ASSETS = [
   'js/ui.js',
   'js/login.js',
   'js/app-admin.js',
+  'js/onboarding.js',
+  'js/set-password.js',
   'js/admin.js',
   'js/manager.js',
   'js/outlet.js',
