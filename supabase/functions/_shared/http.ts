@@ -10,7 +10,10 @@ export function corsHeaders(allowedOrigin: string): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": allowedOrigin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "authorization, content-type",
+    // supabase-js attaches these on every functions.invoke preflight. The
+    // browser aborts with "Request header field apikey is not allowed by
+    // Access-Control-Allow-Headers" unless every one of them is listed.
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin",
   };

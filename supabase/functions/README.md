@@ -112,4 +112,8 @@ localhost origin (http is accepted for localhost only).
    confirming the pre-finalization admin is blocked from the app.
 
 CORS is restricted to `ALLOWED_ORIGIN`; `OPTIONS` is handled; bodies must be
-`application/json` and are size-capped.
+`application/json` and are size-capped. The preflight advertises
+`Access-Control-Allow-Headers: authorization, x-client-info, apikey,
+content-type` — the four headers supabase-js attaches on every
+`functions.invoke` request (omitting `apikey`/`x-client-info` makes the browser
+reject the preflight).
