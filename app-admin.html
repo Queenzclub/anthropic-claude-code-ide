@@ -36,6 +36,13 @@
         <div id="totalsStats" class="stats" style="margin-top: 0.75rem;"></div>
       </section>
 
+      <section id="createCompanySection" style="margin-top: 1.75rem;">
+        <div class="section-head">
+          <h3>➕ Create Company</h3>
+        </div>
+        <div id="createCompanyHost"></div>
+      </section>
+
       <section id="companiesSection" style="margin-top: 1.75rem;">
         <div class="section-head">
           <h3>🏢 Companies</h3>
@@ -53,6 +60,7 @@
           <button id="closeDetail" class="btn btn-outline btn-small" type="button">Close</button>
         </div>
         <div id="companyDetailHost"></div>
+        <div id="onboardingHost"></div>
       </section>
     </main>
   </div>
@@ -65,8 +73,11 @@
   <script src="js/auth.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/app-admin.js"></script>
+  <script src="js/onboarding.js"></script>
   <script>
-    initDashboard('app_admin').then(function (ctx) { if (ctx) initAppAdminPage(ctx); });
+    initDashboard('app_admin').then(function (ctx) {
+      if (ctx) { initAppAdminPage(ctx); initOnboarding(ctx); }
+    });
   </script>
   <script src="js/pwa.js"></script>
 </body>

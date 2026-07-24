@@ -72,6 +72,7 @@ function initAppAdminPage(ctx) {
 
     state.companies = d.company_list || [];
     renderCompanyList();
+    if (window.onboardingDecorate) window.onboardingDecorate();   // Stage 4B-2 badges
   }
 
   function renderCompanyList() {
@@ -109,6 +110,7 @@ function initAppAdminPage(ctx) {
       return;
     }
     renderDetail(res.data);
+    if (window.onboardingDetail) window.onboardingDetail(companyId);   // Stage 4B-2 timeline
   }
 
   function groupHtml(title, itemsHtml, count) {
@@ -289,6 +291,13 @@ function initAppAdminPage(ctx) {
     detailSection.classList.add('hidden');
     state.openId = null;
   });
+
+  // Lets the onboarding module (Stage 4B-2) refresh the overview + open detail
+  // after a successful onboarding without duplicating this module's state.
+  window.__appAdminRefresh = function () {
+    loadOverview();
+    if (state.openId && !detailSection.classList.contains('hidden')) openDetail(state.openId);
+  };
 
   loadOverview();
 }

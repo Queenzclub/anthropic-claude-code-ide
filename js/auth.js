@@ -34,6 +34,25 @@ function takeLoginMessage() {
   } catch (e) { return null; }
 }
 
+// True when the current (inactive) user is a first Company Admin still awaiting
+// password-setup finalization. Server-authoritative; safe fields only. Fails
+// closed to false so an RPC hiccup just shows the normal "not active" message.
+async function firstAdminSetupRequired() {
+  if (!window.sb || !window.sb.rpc) return false;
+  try {
+    var r = await window.sb.rpc('my_first_admin_setup_status');
+    return !!(r && !r.error && r.data && r.data.required);
+  } catch (e) {
+    return false;
+  }
+}
+
+// Redirects an invited first admin to the Complete Account Setup page WITHOUT
+// signing out — their invite/recovery session is what set-password.html needs.
+function sendToSetup() {
+  window.location.replace('set-password.html');
+}
+
 // Checks the current session AND that the profile is usable.
 // Returns { ok:true, user, profile } or { ok:false, reason }.
 // reason is null when simply not logged in.
@@ -55,6 +74,13 @@ async function checkAccess() {
     return { ok: false, reason: 'Profile not found. Please contact your admin.' };
   }
   if (!res.data.active) {
+    // An invited first Company Admin who hasn't finished password setup is
+    // inactive on purpose. Route them to the Complete Account Setup flow rather
+    // than the generic "not active" bounce. The DB is the authority via
+    // my_first_admin_setup_status(); everything else stays as-is.
+    if (await firstAdminSetupRequired()) {
+      return { ok: false, reason: null, setupRequired: true };
+    }
     return { ok: false, reason: 'Your account is not active yet. Please contact your admin.' };
   }
   if (!ROLE_PAGES[res.data.role]) {
@@ -79,6 +105,7 @@ async function guardPage(expectedRole) {
   }
   var result = await checkAccess();
   if (!result.ok) {
+    if (result.setupRequired) { sendToSetup(); return null; }
     await sendToLogin(result.reason);
     return null;
   }
@@ -205,6 +232,7 @@ async function initAnyRolePage() {
   }
   var result = await checkAccess();
   if (!result.ok) {
+    if (result.setupRequired) { sendToSetup(); return null; }
     await sendToLogin(result.reason);
     return null;
   }

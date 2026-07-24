@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     window.location.replace(ROLE_PAGES[existing.profile.role]);
     return;
   }
+  if (existing.setupRequired) { sendToSetup(); return; }
   if (existing.reason) {
     // Session exists but the profile is unusable — sign out and explain.
     try { await window.sb.auth.signOut(); } catch (e) { /* ignore */ }
@@ -70,6 +71,12 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     var result = await checkAccess();
+    if (result.setupRequired) {
+      // Password set earlier but setup not finalized: keep the password session
+      // and route to the Complete Account Setup page (no sign-out).
+      sendToSetup();
+      return;
+    }
     if (!result.ok) {
       try { await window.sb.auth.signOut(); } catch (err) { /* ignore */ }
       showError(result.reason || 'Could not log in. Please try again.');
